@@ -1,307 +1,587 @@
 <?php
-require_once 'config.php';
+require_once 'config.php'; // Database connection
 
-// Handle delete action
-if (isset($_GET['delete_id'])) {
-    $delete_id = intval($_GET['delete_id']);
-    
-    // First, delete associated machines
-    $conn->query("DELETE FROM zoning_machine WHERE client_id = $delete_id");
-    
-    // Then delete client
-    $conn->query("DELETE FROM zoning_clients WHERE id = $delete_id");
-    
-    header("Location: view_clients.php?msg=deleted");
-    exit;
+// Pagination settings
+$limit = 20; // Number of clients per page
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$offset = ($page - 1) * $limit;
+
+// Search functionality
+$search = isset($_GET['search']) ? trim($_GET['search']) : '';
+$classification_filter = isset($_GET['classification']) ? $_GET['classification'] : '';
+
+// Build WHERE clause for search
+$where_clauses = [];
+$params = [];
+$param_types = '';
+
+if (!empty($search)) {
+    $where_clauses[] = "(company_name LIKE ? OR main_signatory LIKE ? OR main_number LIKE ?)";
+    $search_term = "%$search%";
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $param_types .= 'sss';
 }
 
-// Handle status change
-if (isset($_GET['toggle_status'])) {
-    $client_id = intval($_GET['toggle_status']);
-    
-    // Check if client has active machines
-    $machine_check = $conn->query("SELECT COUNT(*) as active_count FROM zoning_machine WHERE client_id = $client_id AND status = 'ACTIVE'");
-    $active_machines = $machine_check->fetch_assoc()['active_count'];
-    
-    if ($active_machines > 0) {
-        header("Location: view_clients.php?error=cannot_deactivate");
-        exit;
-    }
-    
-    // Toggle status
-    $conn->query("UPDATE zoning_clients SET status = IF(status = 'ACTIVE', 'INACTIVE', 'ACTIVE') WHERE id = $client_id");
-    header("Location: view_clients.php?msg=status_updated");
-    exit;
+if (!empty($classification_filter) && in_array($classification_filter, ['GOVERNMENT', 'PRIVATE'])) {
+    $where_clauses[] = "classification = ?";
+    $params[] = $classification_filter;
+    $param_types .= 's';
 }
 
-// Get filter parameter
-$status_filter = $_GET['status'] ?? '';
-
-// Build query with filters
-$query = "
-    SELECT c.*, 
-           COUNT(m.id) as machine_count,
-           SUM(CASE WHEN m.status = 'ACTIVE' THEN 1 ELSE 0 END) as active_machines
-    FROM zoning_clients c
-    LEFT JOIN zoning_machine m ON c.id = m.client_id
-    WHERE 1=1
-";
-
-if ($status_filter) {
-    $query .= " AND c.status = '" . $conn->real_escape_string($status_filter) . "'";
+if (!empty($where_clauses)) {
+    $where_sql = "WHERE " . implode(' AND ', $where_clauses);
+} else {
+    $where_sql = "";
 }
 
-$query .= " GROUP BY c.id ORDER BY c.company_name";
+// Get total number of clients for pagination
+$count_sql = "SELECT COUNT(*) as total FROM clients $where_sql";
+$count_stmt = $conn->prepare($count_sql);
 
-$clients = $conn->query($query);
+if (!empty($params)) {
+    $count_stmt->bind_param($param_types, ...$params);
+}
+
+$count_stmt->execute();
+$count_result = $count_stmt->get_result();
+$total_clients = $count_result->fetch_assoc()['total'];
+$total_pages = ceil($total_clients / $limit);
+
+// Get clients with pagination
+$sql = "SELECT id, classification, company_name, main_signatory, signatory_position, 
+               main_number, main_address, tin_number, email, status, created_at 
+        FROM clients 
+        $where_sql 
+        ORDER BY created_at DESC 
+        LIMIT ? OFFSET ?";
+
+// Add limit and offset to params
+$params[] = $limit;
+$params[] = $offset;
+$param_types .= 'ii';
+
+$stmt = $conn->prepare($sql);
+
+if (!empty($params)) {
+    $stmt->bind_param($param_types, ...$params);
+}
+
+$stmt->execute();
+$result = $stmt->get_result();
+$clients = $result->fetch_all(MYSQLI_ASSOC);
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>View Clients</title>
+    <title>View Clients - Rental System</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f0f2f5; }
-        .header { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .header h1 { margin: 0; color: #333; }
-        .actions { margin-bottom: 20px; }
-        .btn { display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; }
-        .btn:hover { background: #45a049; }
-        .btn-secondary { background: #2196F3; }
-        .btn-secondary:hover { background: #1976D2; }
-        .btn-warning { background: #ff9800; }
-        .btn-warning:hover { background: #e68900; }
-        .btn-danger { background: #f44336; }
-        .btn-danger:hover { background: #d32f2f; }
-        .btn-home{
-            padding: 12px 25px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .header-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            background-color: #3498db;
             color: white;
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: bold;
-            transition: all 0.3s ease;
-        }
-        table { width: 100%; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background: #f5f5f5; font-weight: bold; color: #333; }
-        tr:hover { background: #f9f9f9; }
-        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.9em; }
-        .badge-government { background: #e8f5e9; color: #2e7d32; }
-        .badge-private { background: #e3f2fd; color: #1565c0; }
-        .status-badge { 
-            display: inline-block; 
-            padding: 4px 8px; 
-            border-radius: 4px; 
-            font-size: 0.9em;
-            font-weight: bold;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
             cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            transition: background-color 0.3s;
         }
-        .status-active { 
-            background: #d4edda; 
-            color: #155724; 
+        
+        .btn:hover {
+            background-color: #2980b9;
         }
-        .status-inactive { 
-            background: #f8d7da; 
-            color: #721c24; 
+        
+        .btn-dashboard::before {
+            content: "🏠";
+            margin-right: 8px;
         }
-        .actions-cell { white-space: nowrap; }
-        .actions-cell a { margin-right: 5px; }
-        .message { padding: 10px; margin: 10px 0; border-radius: 4px; }
-        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
-        .search-box { margin-bottom: 20px; }
-        .search-box input { padding: 8px; width: 300px; border: 1px solid #ddd; border-radius: 4px; }
-        .filters { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .filter-group { display: inline-block; margin-right: 20px; }
-        .filter-group label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        .filter-group select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
-        .modal-content { background: white; margin: 10% auto; padding: 20px; width: 80%; max-width: 500px; border-radius: 8px; }
-        .machine-count { font-size: 0.9em; color: #666; }
-        .machine-count .active { color: #4CAF50; }
-        .machine-count .total { color: #666; }
+        
+        .btn-add::before {
+            content: "➕";
+            margin-right: 8px;
+        }
+        
+        .btn-edit {
+            background-color: #f39c12;
+            padding: 6px 12px;
+            font-size: 13px;
+        }
+        
+        .btn-edit:hover {
+            background-color: #d68910;
+        }
+        
+        .btn-edit::before {
+            content: "✏️";
+            margin-right: 5px;
+        }
+        
+        .container {
+            max-width: auto;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            padding: 30px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #3498db;
+        }
+        
+        /* Search and Filter Styles */
+        .search-filter {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .search-box {
+            flex: 1;
+            min-width: 300px;
+        }
+        
+        .search-box input,
+        .filter-box select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        
+        .filter-box {
+            min-width: 200px;
+        }
+        
+        .search-btn {
+            background-color: #2c3e50;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        .search-btn:hover {
+            background-color: #1a252f;
+        }
+        
+        /* Table Styles */
+        .clients-table-container {
+            overflow-x: auto;
+            margin-bottom: 30px;
+        }
+        
+        .clients-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 1000px;
+        }
+        
+        .clients-table th {
+            background-color: #2c3e50;
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        
+        .clients-table td {
+            padding: 15px;
+            border-bottom: 1px solid #e9ecef;
+            vertical-align: top;
+        }
+        
+        .clients-table tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .clients-table tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        
+        .status-active {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .status-inactive {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .classification-gov {
+            background-color: #cce5ff;
+            color: #004085;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .classification-pvt {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .email-cell {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .address-cell {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .actions-cell {
+            white-space: nowrap;
+        }
+        
+        /* Pagination Styles */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .pagination a,
+        .pagination span {
+            padding: 8px 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            text-decoration: none;
+            color: #3498db;
+            background-color: white;
+        }
+        
+        .pagination a:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .pagination .current {
+            background-color: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+        
+        .pagination .disabled {
+            color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        /* Stats Info */
+        .stats-info {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            flex-wrap: wrap;
+        }
+        
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .header-buttons {
+                justify-content: center;
+            }
+            
+            .search-filter {
+                flex-direction: column;
+            }
+            
+            .search-box {
+                min-width: 100%;
+            }
+            
+            .filter-box {
+                min-width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>👥 View Clients</h1>
-        <div class="actions">
-            <a href="dashboard.php" class="btn-home">← Back to Dashboard</a>
-            <a href="add_client.php" class="btn">➕ Add New Client</a>
+    <div class="container">
+        <div class="header">
+            <h1>Client Management</h1>
+            <div class="header-buttons">
+                <a href="dashboard.php" class="btn btn-dashboard">Dashboard</a>
+                <a href="add_client.php" class="btn btn-add">Add New Client</a>
+            </div>
         </div>
-    </div>
-
-    <?php if (isset($_GET['msg'])): ?>
-        <div class="message success">
-            <?php 
-            if ($_GET['msg'] == 'deleted') echo 'Client deleted successfully!';
-            if ($_GET['msg'] == 'updated') echo 'Client updated successfully!';
-            if ($_GET['msg'] == 'status_updated') echo 'Client status updated successfully!';
-            ?>
+        
+        <!-- Stats Information -->
+        <div class="stats-info">
+            <div class="stat-item">
+                <span class="stat-label">Total Clients</span>
+                <span class="stat-value"><?php echo $total_clients; ?></span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Current Page</span>
+                <span class="stat-value"><?php echo $page; ?> / <?php echo $total_pages; ?></span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Showing</span>
+                <span class="stat-value"><?php echo count($clients); ?> clients</span>
+            </div>
         </div>
-    <?php endif; ?>
-
-    <?php if (isset($_GET['error'])): ?>
-        <div class="message error">
-            <?php 
-            if ($_GET['error'] == 'cannot_deactivate') echo 'Cannot deactivate client with active machines!';
-            ?>
-        </div>
-    <?php endif; ?>
-
-    <div class="filters">
-        <form method="GET" style="display: flex; align-items: flex-end; gap: 20px;">
-            <div class="filter-group">
-                <label for="status">Filter by Status:</label>
-                <select id="status" name="status" onchange="this.form.submit()">
-                    <option value="">All Status</option>
-                    <option value="ACTIVE" <?php echo ($status_filter == 'ACTIVE') ? 'selected' : ''; ?>>ACTIVE</option>
-                    <option value="INACTIVE" <?php echo ($status_filter == 'INACTIVE') ? 'selected' : ''; ?>>INACTIVE</option>
+        
+        <!-- Search and Filter -->
+        <form method="GET" action="" class="search-filter">
+            <div class="search-box">
+                <input type="text" 
+                       name="search" 
+                       placeholder="Search by company name, signatory, or phone..." 
+                       value="<?php echo htmlspecialchars($search); ?>">
+            </div>
+            <div class="filter-box">
+                <select name="classification">
+                    <option value="">All Classifications</option>
+                    <option value="GOVERNMENT" <?php echo $classification_filter == 'GOVERNMENT' ? 'selected' : ''; ?>>Government</option>
+                    <option value="PRIVATE" <?php echo $classification_filter == 'PRIVATE' ? 'selected' : ''; ?>>Private</option>
                 </select>
             </div>
-            
-            <div>
-                <a href="view_clients.php" class="btn-secondary" style="padding: 8px 16px;">Clear Filters</a>
-            </div>
+            <button type="submit" class="search-btn">Search</button>
+            <?php if (!empty($search) || !empty($classification_filter)): ?>
+                <a href="view_clients.php" class="btn" style="background-color: #6c757d;">Clear Filters</a>
+            <?php endif; ?>
         </form>
-    </div>
-
-    <div class="search-box">
-        <input type="text" id="searchInput" placeholder="Search clients by name, email, or phone..." onkeyup="searchTable()">
-    </div>
-
-    <table id="clientsTable">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Company Name</th>
-                <th>Classification</th>
-                <th>Status</th>
-                <th>Contact</th>
-                <th>Email</th>
-                <th>Machines</th>
-                <th>Created</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php while($client = $clients->fetch_assoc()): ?>
-            <tr>
-                <td><?php echo $client['id']; ?></td>
-                <td><strong><?php echo $client['company_name']; ?></strong></td>
-                <td>
-                    <span class="badge badge-<?php echo strtolower($client['classification']); ?>">
-                        <?php echo $client['classification']; ?>
-                    </span>
-                </td>
-                <td>
-                    <a href="view_clients.php?toggle_status=<?php echo $client['id']; ?>" 
-                       class="status-badge status-<?php echo strtolower($client['status']); ?>"
-                       onclick="return confirmStatusChange(<?php echo $client['id']; ?>, '<?php echo $client['status']; ?>', <?php echo $client['active_machines']; ?>)"
-                       title="Click to toggle status">
-                        <?php echo $client['status']; ?>
-                    </a>
-                </td>
-                <td><?php echo $client['contact_number']; ?></td>
-                <td><?php echo $client['email']; ?></td>
-                <td>
-                    <div class="machine-count">
-                        <span class="active"><?php echo $client['active_machines']; ?> active</span> / 
-                        <span class="total"><?php echo $client['machine_count']; ?> total</span>
-                    </div>
-                </td>
-                <td><?php echo date('M d, Y', strtotime($client['created_at'])); ?></td>
-                <td class="actions-cell">
-                    <a href="edit_client.php?id=<?php echo $client['id']; ?>" class="btn-warning" style="padding: 5px 10px;">✏️ Edit</a>
-                    <?php if ($client['status'] === 'ACTIVE'): ?>
-                        <a href="add_machine.php?client_id=<?php echo $client['id']; ?>" class="btn-secondary" style="padding: 5px 10px;">➕ Add Machine</a>
-                    <?php endif; ?>
-                    <a href="#" onclick="confirmDelete(<?php echo $client['id']; ?>, '<?php echo addslashes($client['company_name']); ?>')" class="btn-danger" style="padding: 5px 10px;">🗑️ Delete</a>
-                </td>
-            </tr>
-            <?php endwhile; ?>
-        </tbody>
-    </table>
-
-    <div id="deleteModal" class="modal">
-        <div class="modal-content">
-            <h3>Confirm Delete</h3>
-            <p id="deleteMessage"></p>
-            <div style="text-align: right; margin-top: 20px;">
-                <button onclick="closeModal()" style="padding: 8px 16px; margin-right: 10px;">Cancel</button>
-                <button id="confirmDeleteBtn" style="padding: 8px 16px; background: #f44336; color: white; border: none; border-radius: 4px;">Delete</button>
-            </div>
+        
+        <!-- Clients Table -->
+        <div class="clients-table-container">
+            <?php if (!empty($clients)): ?>
+                <table class="clients-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Company Name</th>
+                            <th>Classification</th>
+                            <th>Main Signatory</th>
+                            <th>Position</th>
+                            <th>Contact Number</th>
+                            <th>Email</th>
+                            <th>TIN Number</th>
+                            <th>Status</th>
+                            <th>Created Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($clients as $client): ?>
+                            <tr>
+                                <td>#<?php echo $client['id']; ?></td>
+                                <td>
+                                    <strong><?php echo htmlspecialchars($client['company_name']); ?></strong>
+                                    <div class="address-cell" title="<?php echo htmlspecialchars($client['main_address']); ?>">
+                                        <?php echo htmlspecialchars(substr($client['main_address'], 0, 50)); ?>
+                                        <?php echo strlen($client['main_address']) > 50 ? '...' : ''; ?>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="classification-<?php echo strtolower(substr($client['classification'], 0, 3)); ?>">
+                                        <?php echo htmlspecialchars($client['classification']); ?>
+                                    </span>
+                                </td>
+                                <td><?php echo htmlspecialchars($client['main_signatory']); ?></td>
+                                <td><?php echo htmlspecialchars($client['signatory_position'] ?? 'N/A'); ?></td>
+                                <td><?php echo htmlspecialchars($client['main_number']); ?></td>
+                                <td class="email-cell" title="<?php echo htmlspecialchars($client['email'] ?? ''); ?>">
+                                    <?php echo htmlspecialchars($client['email'] ?? 'N/A'); ?>
+                                </td>
+                                <td><?php echo htmlspecialchars($client['tin_number'] ?? 'N/A'); ?></td>
+                                <td>
+                                    <span class="status-<?php echo strtolower($client['status']); ?>">
+                                        <?php echo htmlspecialchars($client['status']); ?>
+                                    </span>
+                                </td>
+                                <td><?php echo date('M d, Y', strtotime($client['created_at'])); ?></td>
+                                <td class="actions-cell">
+                                    <a href="edit_client.php?id=<?php echo $client['id']; ?>" class="btn btn-edit">Edit</a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php else: ?>
+                <div class="empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <h3>No Clients Found</h3>
+                    <p><?php echo !empty($search) ? 'Try a different search term or ' : ''; ?>
+                       <a href="add_client.php">add your first client</a> to get started.</p>
+                </div>
+            <?php endif; ?>
         </div>
+        
+        <!-- Pagination -->
+        <?php if ($total_pages > 1): ?>
+            <div class="pagination">
+                <!-- First Page -->
+                <?php if ($page > 1): ?>
+                    <a href="?page=1<?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?><?php echo !empty($classification_filter) ? '&classification=' . urlencode($classification_filter) : ''; ?>">« First</a>
+                <?php else: ?>
+                    <span class="disabled">« First</span>
+                <?php endif; ?>
+                
+                <!-- Previous Page -->
+                <?php if ($page > 1): ?>
+                    <a href="?page=<?php echo $page - 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?><?php echo !empty($classification_filter) ? '&classification=' . urlencode($classification_filter) : ''; ?>">‹ Prev</a>
+                <?php else: ?>
+                    <span class="disabled">‹ Prev</span>
+                <?php endif; ?>
+                
+                <!-- Page Numbers -->
+                <?php 
+                $start_page = max(1, $page - 2);
+                $end_page = min($total_pages, $page + 2);
+                
+                for ($i = $start_page; $i <= $end_page; $i++): 
+                ?>
+                    <?php if ($i == $page): ?>
+                        <span class="current"><?php echo $i; ?></span>
+                    <?php else: ?>
+                        <a href="?page=<?php echo $i; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?><?php echo !empty($classification_filter) ? '&classification=' . urlencode($classification_filter) : ''; ?>"><?php echo $i; ?></a>
+                    <?php endif; ?>
+                <?php endfor; ?>
+                
+                <!-- Next Page -->
+                <?php if ($page < $total_pages): ?>
+                    <a href="?page=<?php echo $page + 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?><?php echo !empty($classification_filter) ? '&classification=' . urlencode($classification_filter) : ''; ?>">Next ›</a>
+                <?php else: ?>
+                    <span class="disabled">Next ›</span>
+                <?php endif; ?>
+                
+                <!-- Last Page -->
+                <?php if ($page < $total_pages): ?>
+                    <a href="?page=<?php echo $total_pages; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?><?php echo !empty($classification_filter) ? '&classification=' . urlencode($classification_filter) : ''; ?>">Last »</a>
+                <?php else: ?>
+                    <span class="disabled">Last »</span>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
     </div>
-
+    
     <script>
-    function searchTable() {
-        const input = document.getElementById('searchInput');
-        const filter = input.value.toLowerCase();
-        const table = document.getElementById('clientsTable');
-        const tr = table.getElementsByTagName('tr');
-        
-        for (let i = 1; i < tr.length; i++) {
-            const td = tr[i].getElementsByTagName('td');
-            let found = false;
-            
-            for (let j = 0; j < td.length; j++) {
-                if (td[j]) {
-                    const txtValue = td[j].textContent || td[j].innerText;
-                    if (txtValue.toLowerCase().indexOf(filter) > -1) {
-                        found = true;
-                        break;
-                    }
-                }
+        // Confirm before deleting (if you add delete functionality later)
+        function confirmDelete(clientId, companyName) {
+            if (confirm(`Are you sure you want to delete "${companyName}"? This action cannot be undone.`)) {
+                window.location.href = `delete_client.php?id=${clientId}`;
             }
-            
-            tr[i].style.display = found ? '' : 'none';
-        }
-    }
-    
-    function confirmStatusChange(clientId, currentStatus, activeMachines) {
-        if (currentStatus === 'ACTIVE' && activeMachines > 0) {
-            alert('Cannot deactivate client with active machines. Please deactivate all machines first.');
-            return false;
         }
         
-        const newStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-        const confirmMessage = currentStatus === 'ACTIVE' 
-            ? `Are you sure you want to deactivate this client?` 
-            : `Are you sure you want to activate this client?`;
+        // Quick search on Enter key
+        document.querySelector('input[name="search"]').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                this.form.submit();
+            }
+        });
         
-        return confirm(confirmMessage);
-    }
-    
-    let clientToDelete = null;
-    
-    function confirmDelete(id, name) {
-        clientToDelete = id;
-        document.getElementById('deleteMessage').textContent = `Are you sure you want to delete "${name}"? This will also delete all associated machines.`;
-        document.getElementById('deleteModal').style.display = 'block';
-    }
-    
-    function closeModal() {
-        document.getElementById('deleteModal').style.display = 'none';
-        clientToDelete = null;
-    }
-    
-    document.getElementById('confirmDeleteBtn').addEventListener('click', function() {
-        if (clientToDelete) {
-            window.location.href = `view_clients.php?delete_id=${clientToDelete}`;
-        }
-    });
-    
-    // Close modal when clicking outside
-    window.addEventListener('click', function(event) {
-        const modal = document.getElementById('deleteModal');
-        if (event.target === modal) {
-            closeModal();
-        }
-    });
+        // Auto-focus search box if there's a search term
+        window.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.querySelector('input[name="search"]');
+            if (searchInput.value) {
+                searchInput.select();
+            }
+        });
     </script>
 </body>
 </html>
