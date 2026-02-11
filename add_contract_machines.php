@@ -1,0 +1,786 @@
+<?php
+require_once 'config.php';
+
+// Turn off error display but log them
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// Start output buffering to catch any unexpected output
+ob_start();
+
+$contract_id = isset($_GET['contract_id']) ? intval($_GET['contract_id']) : 0;
+$contract_type = isset($_GET['type']) ? $_GET['type'] : '';
+$client_id = isset($_GET['client_id']) ? intval($_GET['client_id']) : 0;
+
+if (!$contract_id || !$client_id) {
+    die("Invalid contract or client information.");
+}
+
+// Get contract and client information
+$contract_query = $conn->query("
+    SELECT c.*, cl.classification, cl.company_name, cl.status 
+    FROM contracts c
+    JOIN clients cl ON c.client_id = cl.id
+    WHERE c.id = $contract_id
+");
+$contract_data = $contract_query->fetch_assoc();
+
+if (!$contract_data) {
+    die("Contract not found.");
+}
+
+// Check if client is active
+if ($contract_data['status'] === 'INACTIVE') {
+    die("Cannot add machine to inactive client!");
+}
+
+// Function to send JSON error
+function sendJsonError($message) {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    header('Content-Type: application/json');
+    echo json_encode(['success' => false, 'error' => $message]);
+    exit;
+}
+
+// Function to send JSON success
+function sendJsonSuccess($data = []) {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    header('Content-Type: application/json');
+    echo json_encode(array_merge(['success' => true], $data));
+    exit;
+}
+
+// Function to get zone-based fixed reading date
+function getZoneReadingDate($zone_number) {
+    return $zone_number + 2;
+}
+
+// Handle form submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
+    $conn->begin_transaction();
+    
+    try {
+        $machine_count = count($_POST['machine_type']);
+        $highest_reading_date = 0;
+        $success_count = 0;
+        $errors = [];
+        
+        for ($i = 0; $i < $machine_count; $i++) {
+            // Validate required fields
+            if (empty($_POST['barangay'][$i]) || empty($_POST['city'][$i]) || empty($_POST['machine_number'][$i])) {
+                $errors[] = "Barangay, City, and Machine Number are required for Machine " . ($i + 1);
+                continue;
+            }
+            
+            // Get zone data from location
+            $barangay = $_POST['barangay'][$i];
+            $city = $_POST['city'][$i];
+            
+            // Call get_zone_from_location.php to get zone data
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, 'get_zone_from_location.php');
+            curl_setopt($ch, CURLOPT_POST, 1);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
+                'barangay' => $barangay,
+                'city' => $city,
+                'client_id' => $client_id
+            ]));
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HEADER, false);
+            
+            $response = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            
+            if ($http_code === 200) {
+                $zone_data = json_decode($response, true);
+            } else {
+                error_log("Failed to get zone data: HTTP $http_code");
+                $zone_data = ['success' => false];
+            }
+            
+            // Fallback if API call fails
+            if (!$zone_data || !$zone_data['success']) {
+                // Use city fallback logic
+                $city_lower = strtolower(trim($city));
+                $zone_mapping = [
+                    'manila' => 1, 'caloocan' => 2, 'quezon city' => 3,
+                    'pasig' => 6, 'mandaluyong' => 7, 'san juan' => 7,
+                    'makati' => 8, 'taguig' => 9, 'parañaque' => 10,
+                    'las piñas' => 10, 'pasay' => 11, 'valenzuela' => 12
+                ];
+                
+                $zone_number = 1;
+                foreach ($zone_mapping as $key => $num) {
+                    if (strpos($city_lower, $key) !== false) {
+                        $zone_number = $num;
+                        break;
+                    }
+                }
+                
+                $zone_query = $conn->query("SELECT id, zone_number, area_center FROM zoning_zone WHERE zone_number = $zone_number LIMIT 1");
+                $zone = $zone_query->fetch_assoc();
+                
+                $zone_data = [
+                    'zone_id' => $zone['id'],
+                    'zone_number' => $zone['zone_number'],
+                    'area_center' => $zone['area_center'],
+                    'source' => 'local_fallback'
+                ];
+            }
+            
+            $zone_id = $zone_data['zone_id'];
+            $zone_number = $zone_data['zone_number'];
+            $area_center = $zone_data['area_center'];
+            $source = $zone_data['source'] ?? 'unknown';
+            
+            // Get reading date
+            $user_reading_date = isset($_POST['reading_date'][$i]) ? intval($_POST['reading_date'][$i]) : 0;
+            $recommended_reading_date = getZoneReadingDate($zone_number);
+            
+            // Determine if reading date is aligned or misaligned
+            $reading_date_remarks = ($user_reading_date == $recommended_reading_date) 
+                ? 'aligned reading date' 
+                : 'mis-aligned reading date';
+            
+            // Track highest reading date for collection date calculation
+            if ($user_reading_date > $highest_reading_date) {
+                $highest_reading_date = $user_reading_date;
+            }
+            
+            // Get machine details
+            $machine_type = $_POST['machine_type'][$i];
+            $machine_model = $conn->real_escape_string($_POST['machine_model'][$i]);
+            $machine_brand = $conn->real_escape_string($_POST['machine_brand'][$i]);
+            $machine_serial = $conn->real_escape_string($_POST['machine_serial_number'][$i]);
+            $machine_number = $conn->real_escape_string($_POST['machine_number'][$i]);
+            $department = isset($_POST['department'][$i]) ? $conn->real_escape_string($_POST['department'][$i]) : '';
+            $mono_meter_start = intval($_POST['mono_meter_start'][$i]);
+            $color_meter_start = ($machine_type == 'COLOR' && isset($_POST['color_meter_start'][$i])) 
+                ? intval($_POST['color_meter_start'][$i]) : 'NULL';
+            
+            // Address fields
+            $building_number = $conn->real_escape_string($_POST['building_number'][$i]);
+            $street_name = $conn->real_escape_string($_POST['street_name'][$i]);
+            $barangay = $conn->real_escape_string($_POST['barangay'][$i]);
+            $city = $conn->real_escape_string($_POST['city'][$i]);
+            
+            // Comments
+            $comments = isset($_POST['comments'][$i]) 
+                ? $conn->real_escape_string($_POST['comments'][$i]) 
+                : '';
+            
+            // Insert into contract_machines table with department field
+            $sql = "INSERT INTO contract_machines (
+                contract_id, client_id, department, machine_type, machine_model, machine_brand,
+                machine_serial_number, machine_number, mono_meter_start, color_meter_start,
+                building_number, street_name, barangay, city, zone_id, zone_number,
+                area_center, reading_date, reading_date_remarks, comments, status, datecreated, createdby
+            ) VALUES (
+                $contract_id, $client_id, '$department', '$machine_type', '$machine_model',
+                '$machine_brand', '$machine_serial', '$machine_number', $mono_meter_start,
+                $color_meter_start, '$building_number', '$street_name', '$barangay',
+                '$city', $zone_id, $zone_number, '$area_center', $user_reading_date,
+                '$reading_date_remarks', '$comments', 'ACTIVE', NOW(), NULL
+            )";
+            
+            if ($conn->query($sql)) {
+                $success_count++;
+                error_log("Machine $i inserted successfully. Department: $department, Zone: $zone_number via $source");
+            } else {
+                $errors[] = "Failed to insert Machine " . ($i + 1) . ": " . $conn->error;
+                error_log("Failed to insert machine $i: " . $conn->error);
+            }
+        }
+        
+        // Calculate and update collection date for PRIVATE clients
+        if ($contract_data['classification'] == 'PRIVATE' && $highest_reading_date > 0) {
+            $processing_period = intval($contract_data['collection_processing_period']);
+            
+            // Calculate collection date based on highest reading date
+            $collection_date = $highest_reading_date + $processing_period;
+            
+            // Convert to calendar days (30 days per month)
+            if ($collection_date > 31) {
+                $collection_date -= 31;
+            }
+            
+            // Update contract with collection date
+            $conn->query("
+                UPDATE contracts 
+                SET collection_date = $collection_date 
+                WHERE id = $contract_id
+            ");
+            
+            error_log("Updated contract $contract_id with collection date: $collection_date");
+        }
+        
+        $conn->commit();
+        
+        if (!empty($errors)) {
+            sendJsonSuccess([
+                'success_count' => $success_count,
+                'warnings' => $errors,
+                'redirect' => 'view_contracts.php'
+            ]);
+        } else {
+            sendJsonSuccess([
+                'success_count' => $success_count,
+                'redirect' => 'view_contracts.php'
+            ]);
+        }
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+        error_log("Transaction error: " . $e->getMessage());
+        sendJsonError("Failed to save machines: " . $e->getMessage());
+    }
+}
+
+// If we reach here, it's a GET request, so output the HTML form
+while (ob_get_level() > 0) {
+    ob_end_clean();
+}
+
+// Get client classification for JavaScript
+$classification = $contract_data['classification'];
+$company_name = htmlspecialchars($contract_data['company_name']);
+$contract_number = htmlspecialchars($contract_data['contract_number']);
+
+// Determine max machines based on contract type
+$max_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 100;
+$default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Contract Machines</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #f4f6f9; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h2 { color: #2c3e50; margin-bottom: 10px; }
+        h3 { color: #34495e; margin: 20px 0 10px; border-bottom: 1px solid #bdc3c7; padding-bottom: 5px; }
+        .contract-info { background: #e3f2fd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #2196F3; }
+        .machine-entry { 
+            background: #f8f9fa; padding: 20px; margin-bottom: 20px; border-radius: 8px;
+            border-left: 4px solid #2196F3; border: 1px solid #ddd;
+        }
+        .form-row { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
+        .form-group { flex: 1 1 calc(50% - 15px); min-width: 200px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #34495e; font-size: 13px; }
+        .required:after { content: " *"; color: #e74c3c; }
+        input[type="text"], input[type="number"], select, textarea {
+            width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;
+        }
+        input:focus, select:focus, textarea:focus { 
+            border-color: #2196F3; outline: none; box-shadow: 0 0 3px rgba(33,150,243,0.3);
+        }
+        input[readonly] { background: #f5f5f5; color: #666; }
+        .btn-add, .btn-submit { 
+            background: #27ae60; color: white; padding: 10px 20px; border: none; 
+            border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.3s;
+        }
+        .btn-add:hover { background: #229954; }
+        .btn-submit { background: #2196F3; padding: 12px 30px; font-size: 16px; margin-top: 20px; }
+        .btn-submit:hover { background: #1976D2; }
+        .btn-remove { 
+            background: #e74c3c; color: white; border: none; padding: 5px 10px; 
+            border-radius: 3px; cursor: pointer; float: right;
+        }
+        .btn-remove:hover { background: #c0392b; }
+        .info-text { font-size: 12px; color: #7f8c8d; margin-top: 3px; }
+        .zone-display { 
+            background: #e8f5e9; padding: 12px; border-radius: 4px; margin: 10px 0;
+            border-left: 4px solid #4CAF50; font-size: 13px;
+        }
+        .zone-display.misaligned {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+        }
+        .schedule-display {
+            background: #e3f2fd; padding: 12px; border-radius: 4px; margin: 10px 0;
+            border-left: 4px solid #2196F3; font-size: 13px;
+        }
+        .aligned-badge {
+            display: inline-block; padding: 3px 8px; border-radius: 3px;
+            font-size: 11px; font-weight: bold; margin-left: 10px;
+        }
+        .aligned-badge.aligned { background: #d4edda; color: #155724; }
+        .aligned-badge.misaligned { background: #fff3cd; color: #856404; }
+        .hidden { display: none; }
+        .loading {
+            display: inline-block; width: 16px; height: 16px;
+            border: 2px solid #f3f3f3; border-top: 2px solid #2196F3;
+            border-radius: 50%; animation: spin 1s linear infinite;
+            margin-right: 5px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .message { 
+            padding: 15px; margin: 20px 0; border-radius: 5px;
+            display: none; position: fixed; top: 20px; right: 20px;
+            z-index: 1000; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .message.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .message.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .source-badge {
+            display: inline-block; padding: 2px 6px; background: #e9ecef;
+            border-radius: 3px; font-size: 10px; color: #495057;
+            margin-left: 8px;
+        }
+        .department-field {
+            background: #fff8e1;
+            border-left: 3px solid #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Add Machine Details</h2>
+        
+        <div class="contract-info">
+            <strong>Contract #:</strong> <?php echo $contract_number; ?><br>
+            <strong>Client:</strong> <?php echo $company_name; ?><br>
+            <strong>Classification:</strong> 
+            <span style="color: <?php echo $classification === 'GOVERNMENT' ? '#2e7d32' : '#1565c0'; ?>; font-weight: bold;">
+                <?php echo $classification; ?>
+            </span><br>
+            <strong>Contract Type:</strong> <?php echo $contract_type; ?><br>
+            <?php if ($contract_type == 'SINGLE CONTRACT'): ?>
+                <span style="color: #e67e22;">Note: Single contract - you can only add one machine</span>
+            <?php else: ?>
+                <span style="color: #27ae60;">Note: Umbrella contract - you can add multiple machines</span>
+            <?php endif; ?>
+        </div>
+        
+        <form id="machinesForm" method="POST">
+            <input type="hidden" name="contract_id" value="<?php echo $contract_id; ?>">
+            <input type="hidden" name="client_id" value="<?php echo $client_id; ?>">
+            <input type="hidden" id="classification" value="<?php echo $classification; ?>">
+            
+            <?php if ($contract_type == 'UMBRELLA'): ?>
+            <div class="form-group">
+                <label for="machine_count">Number of Machines <span class="required">*</span></label>
+                <input type="number" id="machine_count" name="machine_count" 
+                       min="2" max="<?php echo $max_machines; ?>" value="<?php echo $default_machines; ?>"
+                       onchange="generateMachineFields()">
+                <div class="info-text">Enter number of machines to add (2 to <?php echo $max_machines; ?>)</div>
+            </div>
+            <?php endif; ?>
+            
+            <div id="machinesContainer">
+                <!-- Machine entries will be added here -->
+            </div>
+            
+            <?php if ($contract_type == 'UMBRELLA'): ?>
+                <button type="button" class="btn-add" onclick="addMachineEntry()">+ Add Another Machine</button>
+            <?php endif; ?>
+            
+            <div style="text-align: center;">
+                <button type="submit" id="submitBtn" class="btn-submit">Save All Machines</button>
+            </div>
+        </form>
+    </div>
+    
+    <div id="message" class="message"></div>
+    
+    <script>
+        let machineCount = 0;
+        const maxMachines = <?php echo $max_machines; ?>;
+        const contractType = '<?php echo $contract_type; ?>';
+        const classification = '<?php echo $classification; ?>';
+        const clientId = <?php echo $client_id; ?>;
+        
+        // Initialize form based on contract type
+        document.addEventListener('DOMContentLoaded', function() {
+            if (contractType === 'SINGLE CONTRACT') {
+                addMachineEntry();
+            } else {
+                generateMachineFields();
+            }
+            
+            document.getElementById('machinesForm').addEventListener('submit', handleFormSubmit);
+        });
+        
+        function generateMachineFields() {
+            const count = parseInt(document.getElementById('machine_count')?.value || 2);
+            if (count < 2 && contractType !== 'SINGLE CONTRACT') {
+                showMessage('Please enter at least 2 machines for umbrella contract', 'error');
+                return;
+            }
+            
+            if (count > maxMachines) {
+                showMessage(`Maximum ${maxMachines} machines allowed`, 'error');
+                return;
+            }
+            
+            const container = document.getElementById('machinesContainer');
+            container.innerHTML = '';
+            machineCount = 0;
+            
+            for (let i = 0; i < count; i++) {
+                addMachineEntry();
+            }
+        }
+        
+        function addMachineEntry() {
+            if (machineCount >= maxMachines) {
+                alert(maxMachines == 1 ? 'Single contract can only have one machine.' : 'Maximum machines reached.');
+                return;
+            }
+            
+            const container = document.getElementById('machinesContainer');
+            const entry = document.createElement('div');
+            entry.className = 'machine-entry';
+            entry.id = `machine_${machineCount}`;
+            
+            const currentIndex = machineCount;
+            
+            entry.innerHTML = `
+                <h3 style="display: inline-block;">Machine #${currentIndex + 1}</h3>
+                ${currentIndex > 0 ? `<button type="button" class="btn-remove" onclick="removeMachineEntry(${currentIndex})">Remove</button>` : ''}
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="required">Machine Type</label>
+                        <select name="machine_type[${currentIndex}]" id="machine_type_${currentIndex}" onchange="toggleColorFields(${currentIndex})" required>
+                            <option value="">Select Type</option>
+                            <option value="MONOCHROME">MONOCHROME</option>
+                            <option value="COLOR">COLOR</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="required">Machine Model</label>
+                        <input type="text" name="machine_model[${currentIndex}]" required>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="required">Machine Brand</label>
+                        <input type="text" name="machine_brand[${currentIndex}]" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="required">Serial Number</label>
+                        <input type="text" name="machine_serial_number[${currentIndex}]" required>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="required">Machine Number</label>
+                        <input type="text" name="machine_number[${currentIndex}]" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Department/Office</label>
+                        <input type="text" name="department[${currentIndex}]" placeholder="e.g., Finance Dept, HR Office, etc.">
+                        <div class="info-text">Specify the department or office where this machine is installed</div>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="required">Mono Meter Start</label>
+                        <input type="number" name="mono_meter_start[${currentIndex}]" required>
+                    </div>
+                    <div id="color_fields_${currentIndex}" class="hidden" style="flex: 1;">
+                        <label class="required">Color Meter Start</label>
+                        <input type="number" name="color_meter_start[${currentIndex}]">
+                    </div>
+                </div>
+                
+                <h4 style="margin-top: 20px; margin-bottom: 15px;">Installation Address</h4>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="required">Building/Unit Number</label>
+                        <input type="text" name="building_number[${currentIndex}]" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="required">Street Name</label>
+                        <input type="text" name="street_name[${currentIndex}]" required>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="required">Barangay</label>
+                        <input type="text" name="barangay[${currentIndex}]" id="barangay_${currentIndex}" 
+                               onblur="getZoneInfo(${currentIndex})" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="required">City</label>
+                        <input type="text" name="city[${currentIndex}]" id="city_${currentIndex}" 
+                               onblur="getZoneInfo(${currentIndex})" required>
+                    </div>
+                </div>
+                
+                <div id="zone_display_${currentIndex}" class="zone-display hidden">
+                    <span id="zone_loading_${currentIndex}" class="loading hidden"></span>
+                    <span id="zone_info_${currentIndex}"></span>
+                    <span id="source_badge_${currentIndex}" class="source-badge hidden"></span>
+                </div>
+                
+                <div id="schedule_display_${currentIndex}" class="schedule-display hidden">
+                    <span id="schedule_info_${currentIndex}"></span>
+                </div>
+                
+                <input type="hidden" name="zone_id[${currentIndex}]" id="zone_id_${currentIndex}">
+                <input type="hidden" name="zone_number[${currentIndex}]" id="zone_number_${currentIndex}">
+                <input type="hidden" name="area_center[${currentIndex}]" id="area_center_${currentIndex}">
+                <input type="hidden" id="recommended_reading_date_${currentIndex}" value="">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="required">Reading Date (1-31)</label>
+                        <input type="number" name="reading_date[${currentIndex}]" id="reading_date_${currentIndex}" 
+                               min="1" max="31" onchange="checkReadingDateAlignment(${currentIndex})" required>
+                        <div class="info-text">Recommended: <span id="recommended_date_display_${currentIndex}"></span></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Comments</label>
+                        <textarea name="comments[${currentIndex}]" rows="2" placeholder="Enter any comments or notes about this machine..."></textarea>
+                    </div>
+                </div>
+                
+                <div id="alignment_status_${currentIndex}" style="margin-top: 10px;"></div>
+            `;
+            
+            container.appendChild(entry);
+            machineCount++;
+        }
+        
+        function removeMachineEntry(index) {
+            const entry = document.getElementById(`machine_${index}`);
+            if (entry) {
+                entry.remove();
+                renumberMachines();
+            }
+        }
+        
+        function renumberMachines() {
+            const entries = document.querySelectorAll('.machine-entry');
+            machineCount = entries.length;
+            
+            entries.forEach((entry, index) => {
+                entry.id = `machine_${index}`;
+                const header = entry.querySelector('h3');
+                if (header) header.innerHTML = `Machine #${index + 1}`;
+                
+                const removeBtn = entry.querySelector('.btn-remove');
+                if (removeBtn) {
+                    removeBtn.style.display = index === 0 ? 'none' : 'inline-block';
+                    removeBtn.setAttribute('onclick', `removeMachineEntry(${index})`);
+                }
+                
+                const inputs = entry.querySelectorAll('[name*="["]');
+                inputs.forEach(input => {
+                    const name = input.getAttribute('name');
+                    const newName = name.replace(/\[\d+\]/, `[${index}]`);
+                    input.setAttribute('name', newName);
+                });
+                
+                entry.querySelectorAll('[id]').forEach(el => {
+                    const id = el.getAttribute('id');
+                    const newId = id.replace(/_\d+$/, `_${index}`);
+                    el.setAttribute('id', newId);
+                });
+            });
+        }
+        
+        function toggleColorFields(index) {
+            const select = document.getElementById(`machine_type_${index}`);
+            const colorFields = document.getElementById(`color_fields_${index}`);
+            
+            if (select && colorFields) {
+                colorFields.style.display = select.value === 'COLOR' ? 'block' : 'none';
+                const colorInput = colorFields.querySelector('input');
+                if (colorInput) colorInput.required = select.value === 'COLOR';
+            }
+        }
+        
+        function getZoneInfo(index) {
+            const barangay = document.getElementById(`barangay_${index}`).value.trim();
+            const city = document.getElementById(`city_${index}`).value.trim();
+            
+            if (!city || !barangay) return;
+            
+            const zoneDisplay = document.getElementById(`zone_display_${index}`);
+            const zoneInfo = document.getElementById(`zone_info_${index}`);
+            const zoneLoading = document.getElementById(`zone_loading_${index}`);
+            const sourceBadge = document.getElementById(`source_badge_${index}`);
+            
+            zoneDisplay.classList.remove('hidden');
+            zoneLoading.classList.remove('hidden');
+            zoneInfo.innerHTML = 'Calculating best zone...';
+            sourceBadge.classList.add('hidden');
+            
+            const formData = new FormData();
+            formData.append('barangay', barangay);
+            formData.append('city', city);
+            formData.append('client_id', clientId);
+            
+            fetch('get_zone_from_location.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                zoneLoading.classList.add('hidden');
+                
+                if (data.success) {
+                    document.getElementById(`zone_id_${index}`).value = data.zone_id;
+                    document.getElementById(`zone_number_${index}`).value = data.zone_number;
+                    document.getElementById(`area_center_${index}`).value = data.area_center;
+                    
+                    const recommendedDate = parseInt(data.zone_number) + 2;
+                    document.getElementById(`recommended_reading_date_${index}`).value = recommendedDate;
+                    document.getElementById(`recommended_date_display_${index}`).innerHTML = 
+                        `<strong>Day ${recommendedDate}</strong> (Zone ${data.zone_number})`;
+                    
+                    const readingDateField = document.getElementById(`reading_date_${index}`);
+                    if (!readingDateField.value) {
+                        readingDateField.value = recommendedDate;
+                    }
+                    
+                    let sourceText = '';
+                    switch(data.source) {
+                        case 'database_cache': sourceText = '📍 From cache'; break;
+                        case 'osm': sourceText = '🗺️ Precise location'; break;
+                        case 'city_centroid': sourceText = '🏙️ City center'; break;
+                        case 'city_fallback': sourceText = '📍 City match'; break;
+                        default: sourceText = '📍 Assigned';
+                    }
+                    
+                    zoneInfo.innerHTML = `
+                        <strong>Zone ${data.zone_number}</strong> - ${data.area_center}
+                        ${data.distance_km ? `<br><small>Distance: ${data.distance_km} km</small>` : ''}
+                    `;
+                    
+                    sourceBadge.innerHTML = sourceText;
+                    sourceBadge.classList.remove('hidden');
+                    
+                    if (classification === 'PRIVATE') {
+                        showPrivateSchedule(index, data.zone_number);
+                    }
+                    
+                    checkReadingDateAlignment(index);
+                } else {
+                    zoneInfo.innerHTML = 'Could not determine zone. Please check address.';
+                    zoneDisplay.classList.add('misaligned');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                zoneLoading.classList.add('hidden');
+                zoneInfo.innerHTML = 'Error calculating zone. Please try again.';
+                zoneDisplay.classList.add('misaligned');
+            });
+        }
+        
+        function showPrivateSchedule(index, zoneNumber) {
+            const readingDate = parseInt(zoneNumber) + 2;
+            const scheduleDisplay = document.getElementById(`schedule_display_${index}`);
+            const scheduleInfo = document.getElementById(`schedule_info_${index}`);
+            
+            scheduleInfo.innerHTML = `
+                <strong>📅 Auto-generated Schedule (Private Client)</strong><br>
+                Reading Date: <strong>Day ${readingDate}</strong> (Fixed for Zone ${zoneNumber})<br>
+                <small class="info-text">You can still edit the reading date if needed</small>
+            `;
+            
+            scheduleDisplay.classList.remove('hidden');
+        }
+        
+        function checkReadingDateAlignment(index) {
+            const readingDateField = document.getElementById(`reading_date_${index}`);
+            const recommendedDate = document.getElementById(`recommended_reading_date_${index}`).value;
+            const alignmentStatus = document.getElementById(`alignment_status_${index}`);
+            const zoneDisplay = document.getElementById(`zone_display_${index}`);
+            
+            if (readingDateField && recommendedDate) {
+                const userDate = parseInt(readingDateField.value);
+                const recDate = parseInt(recommendedDate);
+                
+                if (!isNaN(userDate) && !isNaN(recDate)) {
+                    if (userDate === recDate) {
+                        alignmentStatus.innerHTML = `<span class="aligned-badge aligned">✓ ALIGNED READING DATE</span>`;
+                        zoneDisplay.classList.remove('misaligned');
+                    } else {
+                        alignmentStatus.innerHTML = `<span class="aligned-badge misaligned">⚠️ MIS-ALIGNED READING DATE</span>`;
+                        zoneDisplay.classList.add('misaligned');
+                    }
+                }
+            }
+        }
+        
+        function handleFormSubmit(e) {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="loading"></span> Saving...';
+            
+            const formData = new FormData(e.target);
+            formData.append('submit_machines', '1');
+            
+            console.log('Submitting form data with department fields:');
+            for (let [key, value] of formData.entries()) {
+                if (key.includes('department')) {
+                    console.log(key, '=', value);
+                }
+            }
+            
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    return response.text().then(text => {
+                        console.error('Non-JSON response:', text.substring(0, 500));
+                        throw new Error('Server returned non-JSON response');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    showMessage(`✅ Success! ${data.success_count || 0} machine(s) added successfully.`, 'success');
+                    setTimeout(() => {
+                        window.location.href = data.redirect || 'view_contracts.php';
+                    }, 2000);
+                } else {
+                    showMessage(`❌ Error: ${data.error || 'Failed to add machines'}`, 'error');
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = 'Save All Machines';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showMessage(`❌ Error: ${error.message}`, 'error');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = 'Save All Machines';
+            });
+        }
+        
+        function showMessage(text, type) {
+            const msgDiv = document.getElementById('message');
+            msgDiv.className = 'message ' + type;
+            msgDiv.innerHTML = text;
+            msgDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                msgDiv.style.display = 'none';
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
