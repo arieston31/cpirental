@@ -2,7 +2,7 @@
 $host = 'localhost';
 $username = 'root';
 $password = '';
-$database = 'zoningtest';
+$database = 'cpirental';
 
 $conn = new mysqli($host, $username, $password, $database);
 
