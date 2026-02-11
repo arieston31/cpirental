@@ -53,6 +53,20 @@ $ending_this_year = $conn->query("
     AND status = 'ACTIVE'
 ")->fetch_assoc()['count'];
 
+// ============== ZONE DISTRIBUTION FOR TABLE ==============
+$zone_table_stats = $conn->query("
+    SELECT 
+        z.zone_number,
+        z.area_center,
+        z.reading_date,
+        COUNT(cm.id) as machine_count,
+        COUNT(DISTINCT cm.contract_id) as contract_count
+    FROM zoning_zone z
+    LEFT JOIN contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
+    GROUP BY z.id
+    ORDER BY z.zone_number
+");
+
 // ============== CHARTS DATA ==============
 // 1. Contracts by Classification (Government vs Private)
 $classification_stats = $conn->query("
@@ -133,7 +147,7 @@ while($row = $monthly_contracts->fetch_assoc()) {
     $monthly_data[$row['month']] = $row['count'];
 }
 
-// 5. Zone Distribution
+// 5. Zone Distribution Chart
 $zone_distribution = $conn->query("
     SELECT 
         z.zone_number,
@@ -152,30 +166,7 @@ while($row = $zone_distribution->fetch_assoc()) {
     $zone_data[] = $row['machine_count'];
 }
 
-// 6. Contract Expiration Timeline (Next 6 months)
-$expiration_timeline = $conn->query("
-    SELECT 
-        MONTH(contract_end) as month,
-        YEAR(contract_end) as year,
-        COUNT(*) as count
-    FROM contracts
-    WHERE contract_end IS NOT NULL
-    AND contract_end >= '$current_date'
-    AND contract_end <= DATE_ADD('$current_date', INTERVAL 180 DAY)
-    AND status = 'ACTIVE'
-    GROUP BY YEAR(contract_end), MONTH(contract_end)
-    ORDER BY year, month
-    LIMIT 6
-");
-
-$expiration_months = [];
-$expiration_counts = [];
-while($row = $expiration_timeline->fetch_assoc()) {
-    $expiration_months[] = date('M', mktime(0, 0, 0, $row['month'], 1)) . ' ' . $row['year'];
-    $expiration_counts[] = $row['count'];
-}
-
-// 7. Top Clients by Machine Count
+// 6. Top Clients by Machine Count
 $top_clients = $conn->query("
     SELECT 
         cl.id,
@@ -313,7 +304,7 @@ $expiring_next_month = $conn->query("
             background: #f0f2f5; 
             padding: 20px;
         }
-        .container { max-width: 1400px; margin: 0 auto; }
+        .container { max-width: auto; margin: 0 auto; }
         
         /* Header Styles */
         .header {
@@ -602,29 +593,15 @@ $expiring_next_month = $conn->query("
         .btn-danger { background: #e74c3c; color: white; }
         .btn-danger:hover { background: #c0392b; }
         
-        /* Department Badge */
-        .dept-badge {
-            background: #fff8e1;
-            color: #856404;
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 600;
+        /* Zone Badge */
+        .zone-badge {
             display: inline-block;
-        }
-        
-        /* Contract Period */
-        .contract-period {
+            padding: 5px 12px;
+            border-radius: 20px;
             font-size: 12px;
-            line-height: 1.5;
-        }
-        .expiring-soon {
-            color: #e67e22;
             font-weight: 600;
-        }
-        .expired {
-            color: #e74c3c;
-            font-weight: 600;
+            background: #e3f2fd;
+            color: #1976d2;
         }
         
         /* Progress Bar */
@@ -669,6 +646,7 @@ $expiring_next_month = $conn->query("
             <div class="quick-actions" style="margin-bottom: 0; padding: 0; background: transparent;">
                 <a href="add_contracts.php" class="btn btn-success">➕ New Contract</a>
                 <a href="view_contracts.php" class="btn btn-primary">📋 View Contracts</a>
+                <a href="calendar.php" class="btn" style="background: #9b59b6; color: white;">📅 Calendar</a>
                 <a href="view_zones.php" class="btn btn-info">🗺️ Zone Map</a>
             </div>
         </div>
@@ -840,19 +818,6 @@ $expiring_next_month = $conn->query("
             </div>
         </div>
 
-        <!-- Expiration Timeline Chart -->
-        <?php if (!empty($expiration_months)): ?>
-        <div class="chart-card" style="margin-bottom: 30px;">
-            <div class="chart-header">
-                <span class="chart-title">📅 Contract Expiration Timeline (60-Day Window)</span>
-                <span style="color: #7f8c8d;">Next <?php echo count($expiration_months); ?> months</span>
-            </div>
-            <div class="chart-container" style="height: 250px;">
-                <canvas id="expirationChart"></canvas>
-            </div>
-        </div>
-        <?php endif; ?>
-
         <!-- Two Column Layout for Tables -->
         <div class="two-column">
             <!-- Top Clients -->
@@ -893,68 +858,64 @@ $expiring_next_month = $conn->query("
                 </table>
             </div>
 
-            <!-- Top Departments -->
+            <!-- Machine Distribution by Zone - REPLACED Departments -->
             <div class="table-card">
                 <div class="table-header">
-                    <span class="table-title">🏢 Departments by Machine Count</span>
-                    <span class="view-all"><?php echo $machines_with_dept; ?> Machines</span>
+                    <span class="table-title">📍 Machine Distribution by Zone</span>
+                    <a href="view_zones.php" class="view-all">View Map →</a>
                 </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Department</th>
-                            <th>Machines</th>
-                            <th>Distribution</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php 
-                        $dept_stats = $conn->query("
-                            SELECT 
-                                department,
-                                COUNT(*) as machine_count
-                            FROM contract_machines 
-                            WHERE department IS NOT NULL AND department != '' AND status = 'ACTIVE'
-                            GROUP BY department
-                            ORDER BY machine_count DESC
-                            LIMIT 5
-                        ");
-                        if ($dept_stats->num_rows > 0): 
-                            while($dept = $dept_stats->fetch_assoc()): 
-                                $percentage = $machines_with_dept > 0 ? round(($dept['machine_count'] / $machines_with_dept) * 100, 1) : 0;
-                        ?>
+                <div style="max-height: 350px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Zone</th>
+                                <th>Area Center</th>
+                                <th>Reading Day</th>
+                                <th>Machines</th>
+                                <th>Contracts</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if ($zone_table_stats->num_rows > 0): ?>
+                                <?php while($zone = $zone_table_stats->fetch_assoc()): ?>
+                                    <tr>
+                                        <td>
+                                            <span class="zone-badge">
+                                                Zone <?php echo $zone['zone_number']; ?>
+                                            </span>
+                                        </td>
+                                        <td><?php echo htmlspecialchars(substr($zone['area_center'], 0, 25)); ?></td>
+                                        <td><strong>Day <?php echo $zone['reading_date']; ?></strong></td>
+                                        <td>
+                                            <span style="font-weight: 600; color: #9b59b6;"><?php echo $zone['machine_count']; ?></span>
+                                        </td>
+                                        <td><?php echo $zone['contract_count']; ?></td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            <?php else: ?>
                                 <tr>
-                                    <td>
-                                        <span class="dept-badge">
-                                            <?php echo htmlspecialchars(substr($dept['department'], 0, 20)) . (strlen($dept['department']) > 20 ? '...' : ''); ?>
-                                        </span>
-                                    </td>
-                                    <td><strong><?php echo $dept['machine_count']; ?></strong></td>
-                                    <td style="width: 100px;">
-                                        <div style="display: flex; align-items: center; gap: 10px;">
-                                            <div style="width: 60px; height: 6px; background: #ecf0f1; border-radius: 3px;">
-                                                <div style="width: <?php echo $percentage; ?>%; height: 100%; background: #9b59b6; border-radius: 3px;"></div>
-                                            </div>
-                                            <span style="font-size: 11px; color: #7f8c8d;"><?php echo $percentage; ?>%</span>
-                                        </div>
+                                    <td colspan="5" style="text-align: center; padding: 30px;">
+                                        <span style="font-size: 24px;">📍</span>
+                                        <p style="color: #7f8c8d; margin-top: 10px;">No zone data available</p>
                                     </td>
                                 </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
-                            <tr>
-                                <td colspan="3" style="text-align: center; color: #7f8c8d;">No departments found</td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ecf0f1; text-align: center;">
+                    <a href="view_zones.php" style="color: #3498db; text-decoration: none; font-weight: 600;">
+                        View Detailed Zone Map →
+                    </a>
+                </div>
             </div>
         </div>
 
-        <!-- Zone Distribution -->
+        <!-- Zone Distribution Chart - Moved here -->
         <div class="chart-card" style="margin-bottom: 30px;">
             <div class="chart-header">
-                <span class="chart-title">📍 Machine Distribution by Zone</span>
-                <span style="color: #7f8c8d;">Active Machines</span>
+                <span class="chart-title">📊 Zone Distribution Chart</span>
+                <span style="color: #7f8c8d;">Active Machines by Zone</span>
             </div>
             <div class="chart-container" style="height: 300px;">
                 <canvas id="zoneChart"></canvas>
@@ -1042,7 +1003,9 @@ $expiring_next_month = $conn->query("
                                 <td><?php echo htmlspecialchars(substr($machine['company_name'], 0, 20)); ?></td>
                                 <td>
                                     <?php if ($machine['department']): ?>
-                                        <span class="dept-badge"><?php echo htmlspecialchars(substr($machine['department'], 0, 15)); ?></span>
+                                        <span style="background: #fff8e1; color: #856404; padding: 3px 10px; border-radius: 20px; font-size: 11px;">
+                                            <?php echo htmlspecialchars(substr($machine['department'], 0, 15)); ?>
+                                        </span>
                                     <?php else: ?>
                                         <span style="color: #7f8c8d;">—</span>
                                     <?php endif; ?>
@@ -1161,6 +1124,9 @@ $expiring_next_month = $conn->query("
                     <a href="view_contracts.php" style="background: #e8f5e9; color: #2e7d32; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         📋 All Contracts
                     </a>
+                    <a href="calendar.php" style="background: #fff3cd; color: #856404; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                        📅 Calendar
+                    </a>
                     <a href="expiring_contracts.php" style="background: #fff3cd; color: #856404; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         ⏰ Expiring Soon
                     </a>
@@ -1172,6 +1138,9 @@ $expiring_next_month = $conn->query("
                     </a>
                     <a href="view_all_machines.php" style="background: #f3e5f5; color: #6a1b9a; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         🖨️ All Machines
+                    </a>
+                    <a href="view_clients.php" style="background: #ffebee; color: #c62828; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                        🏢 Clients
                     </a>
                 </div>
                 
@@ -1196,6 +1165,7 @@ $expiring_next_month = $conn->query("
             </div>
         </div>
     </div>
+    
 
     <script>
         // Initialize Charts
@@ -1334,43 +1304,6 @@ $expiring_next_month = $conn->query("
                     }
                 }
             });
-
-            // 6. Expiration Timeline Chart
-            <?php if (!empty($expiration_months)): ?>
-            new Chart(document.getElementById('expirationChart'), {
-                type: 'line',
-                data: {
-                    labels: <?php echo json_encode($expiration_months); ?>,
-                    datasets: [{
-                        label: 'Contracts Expiring',
-                        data: <?php echo json_encode($expiration_counts); ?>,
-                        borderColor: '#e67e22',
-                        backgroundColor: 'rgba(230, 126, 34, 0.1)',
-                        borderWidth: 3,
-                        pointBackgroundColor: '#d35400',
-                        pointBorderColor: 'white',
-                        pointBorderWidth: 2,
-                        pointRadius: 5,
-                        pointHoverRadius: 7,
-                        tension: 0.3,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: { color: '#ecf0f1' }
-                        }
-                    }
-                }
-            });
-            <?php endif; ?>
         });
     </script>
 </body>

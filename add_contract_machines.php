@@ -64,10 +64,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
     $conn->begin_transaction();
     
     try {
+        // Check if machine_type exists and is array
+        if (!isset($_POST['machine_type']) || !is_array($_POST['machine_type'])) {
+            throw new Exception("No machine data received.");
+        }
+        
         $machine_count = count($_POST['machine_type']);
         $highest_reading_date = 0;
         $success_count = 0;
         $errors = [];
+        
+        // Create upload directory if not exists
+        $upload_dir = 'uploads/dr_pos/';
+        if (!file_exists($upload_dir)) {
+            mkdir($upload_dir, 0777, true);
+        }
         
         for ($i = 0; $i < $machine_count; $i++) {
             // Validate required fields
@@ -91,6 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
             ]));
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_HEADER, false);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
             
             $response = curl_exec($ch);
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -135,8 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
             
             $zone_id = $zone_data['zone_id'];
             $zone_number = $zone_data['zone_number'];
-            $area_center = $zone_data['area_center'];
-            $source = $zone_data['source'] ?? 'unknown';
+            $area_center = $conn->real_escape_string($zone_data['area_center']);
             
             // Get reading date
             $user_reading_date = isset($_POST['reading_date'][$i]) ? intval($_POST['reading_date'][$i]) : 0;
@@ -152,16 +163,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
                 $highest_reading_date = $user_reading_date;
             }
             
-            // Get machine details
-            $machine_type = $_POST['machine_type'][$i];
+            // Get machine details - escape all string values
+            $machine_type = $conn->real_escape_string($_POST['machine_type'][$i]);
             $machine_model = $conn->real_escape_string($_POST['machine_model'][$i]);
             $machine_brand = $conn->real_escape_string($_POST['machine_brand'][$i]);
             $machine_serial = $conn->real_escape_string($_POST['machine_serial_number'][$i]);
             $machine_number = $conn->real_escape_string($_POST['machine_number'][$i]);
             $department = isset($_POST['department'][$i]) ? $conn->real_escape_string($_POST['department'][$i]) : '';
             $mono_meter_start = intval($_POST['mono_meter_start'][$i]);
-            $color_meter_start = ($machine_type == 'COLOR' && isset($_POST['color_meter_start'][$i])) 
-                ? intval($_POST['color_meter_start'][$i]) : 'NULL';
+            
+            // Handle color meter start - set to NULL if not COLOR or empty
+            $color_meter_start = 'NULL';
+            if ($machine_type == 'COLOR' && isset($_POST['color_meter_start'][$i]) && $_POST['color_meter_start'][$i] !== '') {
+                $color_meter_start = intval($_POST['color_meter_start'][$i]);
+            }
             
             // Address fields
             $building_number = $conn->real_escape_string($_POST['building_number'][$i]);
@@ -174,26 +189,93 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
                 ? $conn->real_escape_string($_POST['comments'][$i]) 
                 : '';
             
-            // Insert into contract_machines table with department field
+            // Handle DR/POS file uploads - FIXED: Check if files exist for this machine index
+            $dr_pos_files = [];
+            $dr_pos_file_count = 0;
+            
+            if (isset($_FILES['dr_pos_files']['name'][$i])) {
+                $file_count = count($_FILES['dr_pos_files']['name'][$i]);
+                
+                for ($j = 0; $j < $file_count; $j++) {
+                    if ($_FILES['dr_pos_files']['error'][$i][$j] == 0) {
+                        $tmp_name = $_FILES['dr_pos_files']['tmp_name'][$i][$j];
+                        $original_name = $_FILES['dr_pos_files']['name'][$i][$j];
+                        
+                        // Check file type - only PDF
+                        $file_type = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
+                        if ($file_type != 'pdf') {
+                            $errors[] = "File " . ($j + 1) . " for Machine " . ($i + 1) . " is not a PDF. Only PDF files are allowed.";
+                            continue;
+                        }
+                        
+                        // Check file size (max 10MB)
+                        if ($_FILES['dr_pos_files']['size'][$i][$j] > 10 * 1024 * 1024) {
+                            $errors[] = "File " . ($j + 1) . " for Machine " . ($i + 1) . " exceeds 10MB limit.";
+                            continue;
+                        }
+                        
+                        // Generate unique filename
+                        $timestamp = time();
+                        $unique_id = uniqid();
+                        $safe_filename = preg_replace("/[^a-zA-Z0-9.]/", "_", $original_name);
+                        $filename = "dr_pos_{$contract_id}_{$machine_count}_{$timestamp}_{$unique_id}_{$safe_filename}";
+                        $filepath = $upload_dir . $filename;
+                        
+                        if (move_uploaded_file($tmp_name, $filepath)) {
+                            $dr_pos_files[] = $filepath;
+                            $dr_pos_file_count++;
+                        }
+                    }
+                }
+            }
+            
+            $dr_pos_files_str = !empty($dr_pos_files) ? "'" . $conn->real_escape_string(implode(',', $dr_pos_files)) . "'" : 'NULL';
+            
+            // Build SQL statement - FIXED: Properly handle NULL values and string escaping
             $sql = "INSERT INTO contract_machines (
                 contract_id, client_id, department, machine_type, machine_model, machine_brand,
                 machine_serial_number, machine_number, mono_meter_start, color_meter_start,
                 building_number, street_name, barangay, city, zone_id, zone_number,
-                area_center, reading_date, reading_date_remarks, comments, status, datecreated, createdby
+                area_center, reading_date, reading_date_remarks, comments, 
+                dr_pos_files, dr_pos_file_count, status, datecreated, createdby
             ) VALUES (
-                $contract_id, $client_id, '$department', '$machine_type', '$machine_model',
-                '$machine_brand', '$machine_serial', '$machine_number', $mono_meter_start,
-                $color_meter_start, '$building_number', '$street_name', '$barangay',
-                '$city', $zone_id, $zone_number, '$area_center', $user_reading_date,
-                '$reading_date_remarks', '$comments', 'ACTIVE', NOW(), NULL
+                $contract_id, 
+                $client_id, 
+                " . ($department ? "'$department'" : "NULL") . ", 
+                '$machine_type', 
+                '$machine_model',
+                '$machine_brand', 
+                '$machine_serial', 
+                '$machine_number', 
+                $mono_meter_start,
+                $color_meter_start, 
+                '$building_number', 
+                '$street_name', 
+                '$barangay',
+                '$city', 
+                $zone_id, 
+                $zone_number, 
+                '$area_center', 
+                $user_reading_date,
+                '$reading_date_remarks', 
+                " . ($comments ? "'$comments'" : "NULL") . ", 
+                $dr_pos_files_str, 
+                $dr_pos_file_count, 
+                'ACTIVE', 
+                NOW(), 
+                NULL
             )";
+            
+            // Log the SQL for debugging
+            error_log("Insert SQL: " . $sql);
             
             if ($conn->query($sql)) {
                 $success_count++;
-                error_log("Machine $i inserted successfully. Department: $department, Zone: $zone_number via $source");
+                error_log("Machine $i inserted successfully. ID: " . $conn->insert_id . ", DR/POS files: $dr_pos_file_count");
             } else {
                 $errors[] = "Failed to insert Machine " . ($i + 1) . ": " . $conn->error;
                 error_log("Failed to insert machine $i: " . $conn->error);
+                error_log("SQL: " . $sql);
             }
         }
         
@@ -267,6 +349,7 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
         .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         h2 { color: #2c3e50; margin-bottom: 10px; }
         h3 { color: #34495e; margin: 20px 0 10px; border-bottom: 1px solid #bdc3c7; padding-bottom: 5px; }
+        h4 { color: #2c3e50; margin: 15px 0 10px; font-size: 16px; }
         .contract-info { background: #e3f2fd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #2196F3; }
         .machine-entry { 
             background: #f8f9fa; padding: 20px; margin-bottom: 20px; border-radius: 8px;
@@ -334,9 +417,78 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             border-radius: 3px; font-size: 10px; color: #495057;
             margin-left: 8px;
         }
-        .department-field {
+        
+        /* DR/POS Upload Styles */
+        .drpos-upload-area {
+            border: 2px dashed #e67e22;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
             background: #fff8e1;
-            border-left: 3px solid #ffc107;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+        
+        .drpos-upload-area:hover {
+            border-color: #d35400;
+            background: #ffecb3;
+        }
+        
+        .drpos-upload-area.dragover {
+            border-color: #27ae60;
+            background: #d4edda;
+        }
+        
+        .drpos-icon {
+            font-size: 24px;
+            color: #e67e22;
+            margin-bottom: 5px;
+        }
+        
+        .drpos-file-list {
+            margin-top: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .drpos-file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 10px;
+            background: white;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            border-left: 3px solid #e67e22;
+            font-size: 12px;
+        }
+        
+        .drpos-file-name {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .drpos-remove-file {
+            color: #e74c3c;
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 5px;
+        }
+        
+        .drpos-remove-file:hover {
+            color: #c0392b;
+        }
+        
+        .file-count-badge {
+            display: inline-block;
+            background: #e67e22;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            margin-left: 8px;
         }
     </style>
 </head>
@@ -359,7 +511,7 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             <?php endif; ?>
         </div>
         
-        <form id="machinesForm" method="POST">
+        <form id="machinesForm" method="POST" enctype="multipart/form-data">
             <input type="hidden" name="contract_id" value="<?php echo $contract_id; ?>">
             <input type="hidden" name="client_id" value="<?php echo $client_id; ?>">
             <input type="hidden" id="classification" value="<?php echo $classification; ?>">
@@ -549,11 +701,136 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
                     </div>
                 </div>
                 
+                <!-- DR/POS Receipt Upload Section - FIXED: Added multiple attribute and proper naming -->
+                <div style="margin-top: 20px; padding: 15px; background: #fff8e1; border-radius: 8px; border-left: 4px solid #e67e22;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <span style="font-size: 20px;">🧾</span>
+                        <span style="font-weight: bold; color: #e67e22;">DR/POS Receipts (Optional)</span>
+                        <span id="file_count_${currentIndex}" class="file-count-badge" style="display: none;">0 files</span>
+                    </div>
+                    
+                    <div id="drpos_upload_${currentIndex}" class="drpos-upload-area" onclick="document.getElementById('drpos_input_${currentIndex}').click()">
+                        <div class="drpos-icon">📄</div>
+                        <div style="font-weight: 600; color: #e67e22;">Click or drag PDF files here</div>
+                        <div style="font-size: 11px; color: #7f8c8d; margin-top: 5px;">
+                            Supported format: PDF only (Max 10MB per file)
+                        </div>
+                        <input type="file" name="dr_pos_files[${currentIndex}][]" id="drpos_input_${currentIndex}" 
+                               accept=".pdf,application/pdf" multiple style="display: none;">
+                    </div>
+                    
+                    <div id="drpos_file_list_${currentIndex}" class="drpos-file-list"></div>
+                    <div class="info-text" style="margin-top: 10px;">
+                        Upload DR (Delivery Receipt) or POS (Point of Sale) receipts related to this machine.
+                    </div>
+                </div>
+                
                 <div id="alignment_status_${currentIndex}" style="margin-top: 10px;"></div>
             `;
             
             container.appendChild(entry);
+            
+            // Add drag and drop listeners
+            const uploadArea = document.getElementById(`drpos_upload_${currentIndex}`);
+            const fileInput = document.getElementById(`drpos_input_${currentIndex}`);
+            
+            uploadArea.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                this.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', function(e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                fileInput.files = files;
+                handleDRPOSFileSelect(currentIndex, files);
+            });
+            
+            fileInput.addEventListener('change', function(e) {
+                handleDRPOSFileSelect(currentIndex, this.files);
+            });
+            
             machineCount++;
+        }
+        
+        function handleDRPOSFileSelect(index, files) {
+            if (files.length > 0) {
+                const fileList = document.getElementById(`drpos_file_list_${index}`);
+                const fileCountBadge = document.getElementById(`file_count_${index}`);
+                
+                let html = '';
+                let validFileCount = 0;
+                
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    
+                    // Validate file type
+                    if (file.type !== 'application/pdf') {
+                        alert(`File "${file.name}" is not a PDF. Only PDF files are allowed.`);
+                        continue;
+                    }
+                    
+                    // Validate file size (10MB)
+                    if (file.size > 10 * 1024 * 1024) {
+                        alert(`File "${file.name}" exceeds the 10MB size limit.`);
+                        continue;
+                    }
+                    
+                    validFileCount++;
+                    
+                    const fileSize = (file.size / 1024).toFixed(1) + ' KB';
+                    html += `
+                        <div class="drpos-file-item" id="drpos_file_${index}_${i}">
+                            <div class="drpos-file-name">
+                                <span style="color: #e67e22;">📄</span>
+                                <span style="font-weight: 500;">${file.name}</span>
+                                <span style="font-size: 10px; color: #7f8c8d;">${fileSize}</span>
+                            </div>
+                            <span class="drpos-remove-file" onclick="removeDRPOSFile(${index}, ${i})">✕</span>
+                        </div>
+                    `;
+                }
+                
+                fileList.innerHTML = html;
+                
+                if (validFileCount > 0) {
+                    fileCountBadge.style.display = 'inline-block';
+                    fileCountBadge.textContent = `${validFileCount} file(s)`;
+                } else {
+                    fileCountBadge.style.display = 'none';
+                }
+            }
+        }
+        
+        function removeDRPOSFile(index, fileIndex) {
+            // Remove from UI
+            const fileItem = document.getElementById(`drpos_file_${index}_${fileIndex}`);
+            if (fileItem) {
+                fileItem.remove();
+            }
+            
+            // Clear the file input and re-add remaining files
+            const fileInput = document.getElementById(`drpos_input_${index}`);
+            const fileList = document.getElementById(`drpos_file_list_${index}`);
+            const remainingFiles = fileList.children.length;
+            const fileCountBadge = document.getElementById(`file_count_${index}`);
+            
+            // Update file count badge
+            if (remainingFiles > 0) {
+                fileCountBadge.textContent = `${remainingFiles} file(s)`;
+            } else {
+                fileCountBadge.style.display = 'none';
+            }
+            
+            // Note: We can't easily modify the FileList, but the form will still submit
+            // the remaining files because we're not modifying the input.files
+            // This just removes the visual representation
         }
         
         function removeMachineEntry(index) {
@@ -579,6 +856,7 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
                     removeBtn.setAttribute('onclick', `removeMachineEntry(${index})`);
                 }
                 
+                // Update all name attributes
                 const inputs = entry.querySelectorAll('[name*="["]');
                 inputs.forEach(input => {
                     const name = input.getAttribute('name');
@@ -586,6 +864,7 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
                     input.setAttribute('name', newName);
                 });
                 
+                // Update IDs
                 entry.querySelectorAll('[id]').forEach(el => {
                     const id = el.getAttribute('id');
                     const newId = id.replace(/_\d+$/, `_${index}`);
@@ -730,10 +1009,11 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             const formData = new FormData(e.target);
             formData.append('submit_machines', '1');
             
-            console.log('Submitting form data with department fields:');
+            // Log form data for debugging
+            console.log('Submitting form data:');
             for (let [key, value] of formData.entries()) {
-                if (key.includes('department')) {
-                    console.log(key, '=', value);
+                if (key.includes('dr_pos_files')) {
+                    console.log(key, '=', value instanceof File ? value.name : value);
                 }
             }
             

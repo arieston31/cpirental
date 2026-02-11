@@ -103,7 +103,7 @@ $map_data_json = json_encode($map_data);
             background: #f0f2f5; 
             padding: 20px;
         }
-        .container { max-width: 1400px; margin: 0 auto; }
+        .container { max-width: auto; margin: 0 auto; }
         
         /* Header */
         .header {
