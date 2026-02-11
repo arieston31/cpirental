@@ -1,0 +1,7 @@
+git init
+git remote add origin https://github.com/arieston31/cpirental.git
+git branch -M main
+git pull origin main --allow-unrelated-histories
+git add .
+git commit -m "Sync from VS Code"
+git push -u origin main
