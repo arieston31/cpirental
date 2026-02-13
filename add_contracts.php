@@ -7,33 +7,43 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_contract'])) {
     $conn->begin_transaction();
     
     try {
-        // Generate contract number
-        $client_id = $_POST['client_id'];
+        // Get client classification
+        $client_id = intval($_POST['client_id']);
         $client_query = $conn->query("SELECT classification FROM clients WHERE id = $client_id");
         $client_data = $client_query->fetch_assoc();
         $classification = $client_data['classification'];
         
-        // Get prefix based on classification
-        $prefix = ($classification == 'GOVERNMENT') ? 'G' : 'P';
-        
         // Get current year
         $year = date('Y');
         
-        // Get the sequence number for this classification AND year
+        // Get prefix based on classification
+        $prefix = ($classification == 'GOVERNMENT') ? 'G' : 'P';
+        
+        // --- FIXED: Get the sequence number for this classification AND year ---
         $seq_query = $conn->query("
             SELECT COUNT(*) as count 
             FROM contracts 
             WHERE contract_number LIKE 'RCN-{$year}-{$prefix}%'
+            AND YEAR(datecreated) = {$year}
         ");
+        
+        if (!$seq_query) {
+            throw new Exception("Error counting contracts: " . $conn->error);
+        }
+        
         $seq_data = $seq_query->fetch_assoc();
         $sequence = str_pad($seq_data['count'] + 1, 3, '0', STR_PAD_LEFT);
         
-        // Get the overall contract count for the last 6 digits
+        // --- FIXED: Get the overall contract count for the last 6 digits ---
         $total_query = $conn->query("SELECT COUNT(*) as total FROM contracts");
         $total_data = $total_query->fetch_assoc();
         $overall_sequence = str_pad($total_data['total'] + 1, 6, '0', STR_PAD_LEFT);
         
+        // Generate contract number
         $contract_number = "RCN-{$year}-{$prefix}{$sequence}-{$overall_sequence}";
+        
+        // Debug log
+        error_log("Generated Contract Number: $contract_number for $classification client");
         
         // Get contract dates
         $contract_start = !empty($_POST['contract_start']) ? "'" . $conn->real_escape_string($_POST['contract_start']) . "'" : 'NULL';
@@ -41,24 +51,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_contract'])) {
         
         // Insert contract
         $has_colored = $_POST['has_colored_machines'];
-        $color_rate = ($has_colored == 'YES') ? $_POST['color_rate'] : 'NULL';
-        $excess_colorrate = ($has_colored == 'YES') ? $_POST['excess_colorrate'] : 'NULL';
-        $mincopies_color = ($has_colored == 'YES') ? $_POST['mincopies_color'] : 'NULL';
-        $collection_date = ($classification == 'GOVERNMENT') ? $_POST['collection_date'] : 'NULL';
-        
+        $color_rate = ($has_colored == 'YES' && !empty($_POST['color_rate'])) ? floatval($_POST['color_rate']) : 'NULL';
+        $excess_colorrate = ($has_colored == 'YES' && !empty($_POST['excess_colorrate'])) ? floatval($_POST['excess_colorrate']) : 'NULL';
+        $mincopies_color = ($has_colored == 'YES' && !empty($_POST['mincopies_color'])) ? intval($_POST['mincopies_color']) : 'NULL';
+        $collection_date = ($classification == 'GOVERNMENT' && !empty($_POST['collection_date'])) ? intval($_POST['collection_date']) : 'NULL';
+        // Get minimum monthly charge
+        $minimum_monthly_charge = !empty($_POST['minimum_monthly_charge']) ? floatval($_POST['minimum_monthly_charge']) : 'NULL';
+
+        // In the INSERT statement, add minimum_monthly_charge field
         $contract_sql = "INSERT INTO contracts (
             contract_number, contract_start, contract_end, client_id, type_of_contract, has_colored_machines,
             mono_rate, color_rate, excess_monorate, excess_colorrate,
-            mincopies_mono, mincopies_color, spoilage, collection_processing_period,
+            mincopies_mono, mincopies_color, spoilage, minimum_monthly_charge, collection_processing_period,
             collection_date, vatable, status, datecreated, createdby
         ) VALUES (
             '$contract_number', $contract_start, $contract_end, $client_id, '{$_POST['type_of_contract']}', '$has_colored',
             '{$_POST['mono_rate']}', $color_rate, '{$_POST['excess_monorate']}', $excess_colorrate,
-            '{$_POST['mincopies_mono']}', $mincopies_color, '{$_POST['spoilage']}', '{$_POST['collection_processing_period']}',
+            '{$_POST['mincopies_mono']}', $mincopies_color, '{$_POST['spoilage']}', $minimum_monthly_charge, '{$_POST['collection_processing_period']}',
             $collection_date, '{$_POST['vatable']}', 'ACTIVE', NOW(), NULL
         )";
         
-        $conn->query($contract_sql);
+        if (!$conn->query($contract_sql)) {
+            throw new Exception("Error inserting contract: " . $conn->error);
+        }
+        
         $contract_id = $conn->insert_id;
         
         // Handle file upload
@@ -70,25 +86,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_contract'])) {
             
             $uploaded_files = [];
             foreach ($_FILES['contract_files']['tmp_name'] as $key => $tmp_name) {
-                $file_name = time() . '_' . $_FILES['contract_files']['name'][$key];
-                $file_path = $upload_dir . $file_name;
-                if (move_uploaded_file($tmp_name, $file_path)) {
-                    $uploaded_files[] = $file_path;
+                if ($_FILES['contract_files']['error'][$key] == 0) {
+                    // Validate file type
+                    $file_type = strtolower(pathinfo($_FILES['contract_files']['name'][$key], PATHINFO_EXTENSION));
+                    if ($file_type != 'pdf') {
+                        throw new Exception("Only PDF files are allowed.");
+                    }
+                    
+                    // Generate unique filename
+                    $file_name = time() . '_' . uniqid() . '_' . preg_replace("/[^a-zA-Z0-9.]/", "_", $_FILES['contract_files']['name'][$key]);
+                    $file_path = $upload_dir . $file_name;
+                    
+                    if (move_uploaded_file($tmp_name, $file_path)) {
+                        $uploaded_files[] = $file_path;
+                    }
                 }
             }
             
-            $conn->query("UPDATE contracts SET contract_file = '" . implode(',', $uploaded_files) . "' WHERE id = $contract_id");
+            if (!empty($uploaded_files)) {
+                $conn->query("UPDATE contracts SET contract_file = '" . implode(',', $uploaded_files) . "' WHERE id = $contract_id");
+            }
         }
         
         $conn->commit();
         
         // Redirect to add machine details
-        header("Location: add_contract_machines.php?contract_id=$contract_id&type={$_POST['type_of_contract']}&client_id=$client_id");
+        header("Location: add_contract_machines.php?contract_id=$contract_id&type=" . urlencode($_POST['type_of_contract']) . "&client_id=$client_id");
         exit();
         
     } catch (Exception $e) {
         $conn->rollback();
         $error = "Error: " . $e->getMessage();
+        error_log("Contract creation error: " . $e->getMessage());
     }
 }
 
@@ -107,6 +136,37 @@ if (isset($_GET['search'])) {
     }
     header('Content-Type: application/json');
     echo json_encode($clients);
+    exit;
+}
+
+// Function to get next contract number via AJAX
+function getNextContractNumber($conn, $classification, $year = null) {
+    if (!$year) $year = date('Y');
+    $prefix = ($classification == 'GOVERNMENT') ? 'G' : 'P';
+    
+    $seq_query = $conn->query("
+        SELECT COUNT(*) as count 
+        FROM contracts 
+        WHERE contract_number LIKE 'RCN-{$year}-{$prefix}%'
+        AND YEAR(datecreated) = {$year}
+    ");
+    $seq_data = $seq_query->fetch_assoc();
+    $sequence = str_pad($seq_data['count'] + 1, 3, '0', STR_PAD_LEFT);
+    
+    $total_query = $conn->query("SELECT COUNT(*) as total FROM contracts");
+    $total_data = $total_query->fetch_assoc();
+    $overall_sequence = str_pad($total_data['total'] + 1, 6, '0', STR_PAD_LEFT);
+    
+    return "RCN-{$year}-{$prefix}{$sequence}-{$overall_sequence}";
+}
+
+// Handle AJAX request for contract number
+if (isset($_GET['get_contract_number']) && isset($_GET['classification'])) {
+    $classification = $_GET['classification'];
+    $year = isset($_GET['year']) ? $_GET['year'] : date('Y');
+    $contract_number = getNextContractNumber($conn, $classification, $year);
+    header('Content-Type: application/json');
+    echo json_encode(['contract_number' => $contract_number]);
     exit;
 }
 ?>
@@ -165,6 +225,24 @@ if (isset($_GET['search'])) {
             flex: 1;
             margin-bottom: 0;
         }
+        .contract-number-preview {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #27ae60;
+            margin-bottom: 20px;
+        }
+        .contract-number-preview label {
+            color: #27ae60;
+            margin-bottom: 5px;
+        }
+        .contract-number-preview input {
+            background: white;
+            font-family: monospace;
+            font-size: 16px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
     </style>
 </head>
 <body>
@@ -187,10 +265,11 @@ if (isset($_GET['search'])) {
                 <div id="selectedClientInfo" style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px; display: none;"></div>
             </div>
             
-            <!-- Contract Number (Auto-generated) -->
-            <div class="form-group">
-                <label>Contract Number (Auto-generated)</label>
-                <input type="text" id="contract_number" value="RCN-<?php echo date('Y'); ?>-G001-000001" readonly style="background: #f8f9fa;">
+            <!-- Contract Number (Auto-generated) - FIXED: Dynamic preview -->
+            <div class="contract-number-preview">
+                <label>📋 Contract Number (Auto-generated)</label>
+                <input type="text" id="contract_number" value="RCN-<?php echo date('Y'); ?>-G001-000001" readonly style="background: #f8f9fa; font-weight: bold;">
+                <div class="info-text">Contract number will be generated based on client type and year</div>
             </div>
             
             <!-- Contract Date Range -->
@@ -280,6 +359,26 @@ if (isset($_GET['search'])) {
                     </select>
                 </div>
             </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="required">Spoilage (%)</label>
+                    <input type="number" step="0.01" name="spoilage" required>
+                </div>
+                <div class="form-group">
+                    <label>Minimum Monthly Charge (₱)</label>
+                    <input type="number" step="0.01" name="minimum_monthly_charge" placeholder="0.00">
+                    <div class="info-text">Optional minimum monthly billing amount</div>
+                </div>
+                <div class="form-group">
+                    <label class="required">Vatable</label>
+                    <select name="vatable" required>
+                        <option value="">Select</option>
+                        <option value="YES">YES</option>
+                        <option value="NO">NO</option>
+                    </select>
+                </div>
+            </div>
             
             <div class="form-row">
                 <div class="form-group">
@@ -297,7 +396,7 @@ if (isset($_GET['search'])) {
             <div class="form-group">
                 <label>Upload Contract (PDF) - Optional</label>
                 <input type="file" name="contract_files[]" accept=".pdf" multiple>
-                <div class="info-text">You can select multiple PDF files</div>
+                <div class="info-text">You can select multiple PDF files (Max 10MB each)</div>
             </div>
             
             <div style="text-align: center; margin-top: 30px;">
@@ -342,6 +441,7 @@ if (isset($_GET['search'])) {
             }
         });
         
+        // FIXED: Select client function with proper contract number generation
         function selectClient(client) {
             document.getElementById('client_id').value = client.id;
             document.getElementById('clientSearch').value = `${client.company_name} - ${client.main_signatory}`;
@@ -364,10 +464,20 @@ if (isset($_GET['search'])) {
                 document.getElementById('collection_date').required = false;
             }
             
-            // Update contract number preview
+            // FIXED: Get actual next contract number from server
             const year = new Date().getFullYear();
             const prefix = client.classification === 'GOVERNMENT' ? 'G' : 'P';
-            document.getElementById('contract_number').value = `RCN-${year}-${prefix}001-000001`;
+            
+            fetch(`add_contracts.php?get_contract_number=1&classification=${client.classification}&year=${year}`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('contract_number').value = data.contract_number;
+                })
+                .catch(error => {
+                    console.error('Error fetching contract number:', error);
+                    // Fallback preview
+                    document.getElementById('contract_number').value = `RCN-${year}-${prefix}001-000001`;
+                });
         }
         
         // Close search results when clicking outside
@@ -433,6 +543,23 @@ if (isset($_GET['search'])) {
         document.getElementById('color_rate_group').style.display = 'none';
         document.getElementById('mincopies_color_group').style.display = 'none';
         document.getElementById('collection_date_group').style.display = 'none';
+        
+        // File upload validation
+        document.querySelector('input[name="contract_files[]"]').addEventListener('change', function(e) {
+            const files = e.target.files;
+            for (let i = 0; i < files.length; i++) {
+                if (files[i].type !== 'application/pdf') {
+                    alert(`File "${files[i].name}" is not a PDF. Only PDF files are allowed.`);
+                    this.value = '';
+                    return;
+                }
+                if (files[i].size > 10 * 1024 * 1024) {
+                    alert(`File "${files[i].name}" exceeds the 10MB size limit.`);
+                    this.value = '';
+                    return;
+                }
+            }
+        });
     </script>
 </body>
 </html>

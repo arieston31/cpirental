@@ -400,6 +400,7 @@ $contracts = $stmt->get_result();
                         <th>Contract Type</th>
                         <th>Machines</th>
                         <th>Rates</th>
+                        <th>Min. Charge</th> 
                         <th>Collection</th>
                         <th>Contract File</th>
                         <th>Status</th>
@@ -464,8 +465,8 @@ $contracts = $stmt->get_result();
                                 <td style="text-align: center;">
                                     <a href="view_machines.php?contract_id=<?php echo $contract['id']; ?>" 
                                        style="text-decoration: none; display: inline-block;">
-                                        <span style="background: #3498db; color: white; padding: 5px 12px; border-radius: 20px; font-weight: 600; font-size: 12px;">
-                                            <?php echo $contract['machine_count']; ?> Machines
+                                        <span style="color: black; padding: 5px 12px;  font-weight: 600; font-size: 12px;">
+                                            <?php echo $contract['machine_count']; ?> Machine/s
                                         </span>
                                     </a>
                                 </td>
@@ -476,6 +477,17 @@ $contracts = $stmt->get_result();
                                             <span style="font-weight: 600;">Color:</span> ₱<?php echo number_format($contract['color_rate'], 2); ?>
                                         <?php endif; ?>
                                     </div>
+                                </td>
+                                
+                                <td>
+                                    <?php if (!empty($contract['minimum_monthly_charge']) && $contract['minimum_monthly_charge'] > 0): ?>
+                                        <div style="background: #fff8e1; padding: 5px 10px; border-radius: 20px; text-align: center;">
+                                            <span style="font-weight: 600; color: #e67e22;">₱<?php echo number_format($contract['minimum_monthly_charge'], 2); ?></span>
+                                            <span style="display: block; font-size: 10px; color: #856404;">Minimum Monthly</span>
+                                        </div>
+                                    <?php else: ?>
+                                        <span style="color: #7f8c8d; font-size: 12px;">Not set</span>
+                                    <?php endif; ?>
                                 </td>
                                 <td>
                                     <div style="font-size: 12px;">

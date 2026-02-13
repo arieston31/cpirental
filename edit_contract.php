@@ -32,6 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $mincopies_mono = intval($_POST['mincopies_mono']);
     $mincopies_color = isset($_POST['mincopies_color']) && !empty($_POST['mincopies_color']) ? intval($_POST['mincopies_color']) : 'NULL';
     $spoilage = floatval($_POST['spoilage']);
+    $minimum_monthly_charge = !empty($_POST['minimum_monthly_charge']) ? floatval($_POST['minimum_monthly_charge']) : 'NULL';
     $collection_processing_period = intval($_POST['collection_processing_period']);
     $collection_date = !empty($_POST['collection_date']) ? intval($_POST['collection_date']) : 'NULL';
     $vatable = $_POST['vatable'];
@@ -47,6 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     mincopies_mono = '$mincopies_mono',
                     mincopies_color = $mincopies_color,
                     spoilage = '$spoilage',
+                    minimum_monthly_charge = $minimum_monthly_charge,
                     collection_processing_period = '$collection_processing_period',
                     collection_date = $collection_date,
                     vatable = '$vatable',
@@ -130,15 +132,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             margin-bottom: 20px;
             border-left: 4px solid #3498db;
         }
-        .duration-badge {
-            display: inline-block;
-            padding: 5px 12px;
-            background: #27ae60;
-            color: white;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-top: 10px;
+        .minimum-charge {
+            background: #fff8e1;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #f39c12;
         }
     </style>
 </head>
@@ -227,10 +225,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 <?php endif; ?>
             </div>
             
+            <!-- Minimum Monthly Charge - NEW FIELD -->
             <div class="form-row">
                 <div class="form-group">
                     <label>Spoilage (%)</label>
                     <input type="number" step="0.01" name="spoilage" value="<?php echo $contract['spoilage']; ?>" required>
+                </div>
+                <div class="form-group">
+                    <label>Minimum Monthly Charge (₱)</label>
+                    <input type="number" step="0.01" name="minimum_monthly_charge" 
+                           value="<?php echo $contract['minimum_monthly_charge']; ?>" 
+                           placeholder="0.00" 
+                           style="border-color: <?php echo !empty($contract['minimum_monthly_charge']) ? '#f39c12' : '#ddd'; ?>;">
+                    <div class="info-text">Optional minimum monthly billing amount</div>
                 </div>
                 <div class="form-group">
                     <label>Vatable</label>

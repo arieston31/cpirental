@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Feb 11, 2026 at 05:40 PM
+-- Generation Time: Feb 13, 2026 at 09:35 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.0.30
 
@@ -42,9 +42,9 @@ CREATE TABLE `barangay_coordinates` (
 --
 
 INSERT INTO `barangay_coordinates` (`id`, `barangay`, `city`, `latitude`, `longitude`, `zone_id`, `last_updated`) VALUES
-(1, 'Barangay 660-A', 'Manila', 14.629646, 120.962522, 1, '2026-02-11 15:55:40'),
-(2, 'Barangay 660', 'Manila', 14.629646, 120.962522, 1, '2026-02-11 15:56:11'),
-(3, 'Barangay 660', 'Manila CIty', 14.576823, 120.993155, 7, '2026-02-11 15:58:15');
+(1, 'Barangay Sikatuna Village', 'Quezon City', 14.676000, 121.043700, 3, '2026-02-13 06:26:21'),
+(2, 'Baranggay Sikatuna Village', 'Quezon CIty', 14.676000, 121.043700, 3, '2026-02-13 06:26:40'),
+(3, 'Barangay Tuktukan', 'Taguig CIty', 14.517600, 121.050900, 10, '2026-02-13 06:55:29');
 
 -- --------------------------------------------------------
 
@@ -99,6 +99,7 @@ CREATE TABLE `contracts` (
   `mincopies_mono` int(11) NOT NULL,
   `mincopies_color` int(11) DEFAULT NULL,
   `spoilage` decimal(5,2) NOT NULL,
+  `minimum_monthly_charge` decimal(10,2) DEFAULT NULL,
   `collection_processing_period` int(11) NOT NULL,
   `collection_date` int(11) DEFAULT NULL,
   `vatable` enum('YES','NO') NOT NULL,
@@ -113,9 +114,10 @@ CREATE TABLE `contracts` (
 -- Dumping data for table `contracts`
 --
 
-INSERT INTO `contracts` (`id`, `contract_number`, `contract_start`, `contract_end`, `client_id`, `type_of_contract`, `has_colored_machines`, `mono_rate`, `color_rate`, `excess_monorate`, `excess_colorrate`, `mincopies_mono`, `mincopies_color`, `spoilage`, `collection_processing_period`, `collection_date`, `vatable`, `contract_file`, `status`, `datecreated`, `updated_at`, `createdby`) VALUES
-(2, 'RCN-2026-P001-000001', NULL, NULL, 1, 'SINGLE CONTRACT', 'NO', 0.56, NULL, 0.75, NULL, 6000, NULL, 2.00, 10, 17, 'YES', NULL, 'ACTIVE', '2026-02-11 22:14:42', NULL, NULL),
-(3, 'RCN-2026-G001-000002', '2025-08-01', '2026-03-31', 2, 'UMBRELLA', 'YES', 1.00, 4.00, 1.00, 4.00, 195000, 27300, 2.00, 30, 15, 'YES', 'uploads/contracts/1770824444_Step Ahead Company Inc_Pantum 7105.pdf', 'ACTIVE', '2026-02-11 23:40:44', '2026-02-12 00:08:44', NULL);
+INSERT INTO `contracts` (`id`, `contract_number`, `contract_start`, `contract_end`, `client_id`, `type_of_contract`, `has_colored_machines`, `mono_rate`, `color_rate`, `excess_monorate`, `excess_colorrate`, `mincopies_mono`, `mincopies_color`, `spoilage`, `minimum_monthly_charge`, `collection_processing_period`, `collection_date`, `vatable`, `contract_file`, `status`, `datecreated`, `updated_at`, `createdby`) VALUES
+(2, 'RCN-2026-P001-000001', '2025-02-01', '2026-02-28', 1, 'SINGLE CONTRACT', 'NO', 0.56, NULL, 0.75, NULL, 6000, NULL, 2.00, 3360.00, 10, 16, 'YES', 'uploads/contracts/1770831026_omnibus.pdf,uploads/contracts/1770831041_page_3.pdf', 'ACTIVE', '2026-02-11 22:14:42', '2026-02-13 13:38:18', NULL),
+(3, 'RCN-2026-G001-000002', '2025-08-01', '2026-03-31', 2, 'UMBRELLA', 'YES', 1.00, 4.00, 1.00, 4.00, 195000, 27300, 2.00, NULL, 30, 15, 'YES', 'uploads/contracts/1770824444_Step Ahead Company Inc_Pantum 7105.pdf,uploads/contracts/1770831079_CATALOGUE.pdf', 'ACTIVE', '2026-02-11 23:40:44', '2026-02-12 01:25:33', NULL),
+(4, 'RCN-2026-P002-000003', '2025-01-01', '2025-12-31', 4, 'SINGLE CONTRACT', 'YES', 0.56, 4.40, 0.56, 4.40, 1500, 800, 2.00, NULL, 10, 15, 'YES', 'uploads/contracts/1770831784_Ouotation - Copier Online.pdf', 'ACTIVE', '2026-02-12 01:43:04', NULL, NULL);
 
 -- --------------------------------------------------------
 
@@ -145,6 +147,8 @@ CREATE TABLE `contract_machines` (
   `reading_date` int(11) NOT NULL,
   `reading_date_remarks` varchar(50) DEFAULT NULL,
   `comments` text DEFAULT NULL,
+  `dr_pos_files` text DEFAULT NULL,
+  `dr_pos_file_count` int(11) DEFAULT 0,
   `status` enum('ACTIVE','INACTIVE') DEFAULT 'ACTIVE',
   `datecreated` datetime DEFAULT current_timestamp(),
   `updated_at` datetime DEFAULT NULL,
@@ -155,11 +159,12 @@ CREATE TABLE `contract_machines` (
 -- Dumping data for table `contract_machines`
 --
 
-INSERT INTO `contract_machines` (`id`, `contract_id`, `client_id`, `department`, `machine_type`, `machine_model`, `machine_brand`, `machine_serial_number`, `machine_number`, `mono_meter_start`, `color_meter_start`, `building_number`, `street_name`, `barangay`, `city`, `zone_id`, `zone_number`, `area_center`, `reading_date`, `reading_date_remarks`, `comments`, `status`, `datecreated`, `updated_at`, `createdby`) VALUES
-(2, 2, 1, 'Sales Department', 'MONOCHROME', 'CANON', 'IR2525', 'MKL5269520', 'CPI2569', 500, NULL, '165', 'Kamias', 'Sikatuna Village', 'Quezon City', 5, 5, 'Quezon City South / East (Diliman)', 7, 'aligned reading date', '', 'ACTIVE', '2026-02-11 22:31:33', '2026-02-12 00:14:39', NULL),
-(3, 3, 2, 'Office of the Director General', 'COLOR', 'Sindoh', 'D410', 'NHU52698232', 'CPI-9162', 403987, 178270, '1000', 'Padre Burgos Avenue', 'Barangay 660', 'Manila CIty', 7, 7, 'Manila City (Rizal Park / City Hall)', 9, 'aligned reading date', '', 'ACTIVE', '2026-02-12 00:01:54', '2026-02-12 00:18:32', NULL),
-(4, 3, 2, 'Board of Trustees Secretariat', 'COLOR', 'Sindoh', 'D410', 'SFT52399532', 'CPI-9212', 107849, 124812, '1000', 'Padre Burgos Avenue', 'Barangay 660', 'Manila CIty', 7, 7, 'Manila City (Rizal Park / City Hall)', 9, 'aligned reading date', '', 'ACTIVE', '2026-02-12 00:01:54', '2026-02-12 00:18:47', NULL),
-(5, 3, 2, 'Office of the Director IIs ', 'COLOR', 'Sindoh', 'D410', 'SFT3698571', 'CPI-9164', 561447, 114935, '1000', 'Padre Burgos Avenue', 'Barangay 660', 'Manila CIty', 7, 7, 'Manila City (Rizal Park / City Hall)', 9, 'aligned reading date', '', 'ACTIVE', '2026-02-12 00:01:54', '2026-02-12 00:19:06', NULL);
+INSERT INTO `contract_machines` (`id`, `contract_id`, `client_id`, `department`, `machine_type`, `machine_model`, `machine_brand`, `machine_serial_number`, `machine_number`, `mono_meter_start`, `color_meter_start`, `building_number`, `street_name`, `barangay`, `city`, `zone_id`, `zone_number`, `area_center`, `reading_date`, `reading_date_remarks`, `comments`, `dr_pos_files`, `dr_pos_file_count`, `status`, `datecreated`, `updated_at`, `createdby`) VALUES
+(2, 2, 1, 'Sales Department', 'MONOCHROME', 'CANON', 'IR2525', 'MKL5269520', 'CPI2569', 500, NULL, '165', 'Kamias', 'Sikatuna Village', 'Quezon City', 3, 3, 'Quezon City Central (Tandang Sora)', 6, 'aligned reading date', '', NULL, 0, 'ACTIVE', '2026-02-11 22:31:33', '2026-02-13 11:23:20', NULL),
+(3, 3, 2, 'Office of the Director General', 'COLOR', 'Sindoh', 'D410', 'NHU52698232', 'CPI-9162', 403987, 178270, '1000', 'Padre Burgos Avenue', 'Barangay 660', 'Manila CIty', 7, 7, 'Manila City (Rizal Park / City Hall)', 9, 'aligned reading date', '', 'uploads/dr_pos/1770832548_698cc2a465a02_RESPONSE_FOR_FINAL_DEMAND_RECONCILED_HO_WITH_RENEWAL_AND_PULLOUT.pdf', 1, 'ACTIVE', '2026-02-12 00:01:54', '2026-02-13 11:22:19', NULL),
+(4, 3, 2, 'Board of Trustees Secretariat', 'COLOR', 'Sindoh', 'D410', 'SFT52399532', 'CPI-9212', 107849, 124812, '1000', 'Padre Burgos Avenue', 'Barangay 660', 'Manila CIty', 7, 7, 'Manila City (Rizal Park / City Hall)', 9, 'aligned reading date', '', NULL, 0, 'ACTIVE', '2026-02-12 00:01:54', '2026-02-13 11:22:33', NULL),
+(5, 3, 2, 'Office of the Director IIs ', 'COLOR', 'Sindoh', 'D410', 'SFT3698571', 'CPI-9164', 561447, 114935, '1000', 'Padre Burgos Avenue', 'Barangay 660', 'Manila CIty', 7, 7, 'Manila City (Rizal Park / City Hall)', 9, 'aligned reading date', '', NULL, 0, 'ACTIVE', '2026-02-12 00:01:54', '2026-02-13 11:22:42', NULL),
+(6, 4, 4, 'IT', 'COLOR', 'KONICA MINOLTA', 'BIZHUB C458', 'LOK5256987', 'CPI9876', 600, 300, '102', 'Kalayaan', 'Barangay Central', 'Quezon CIty', 3, 3, 'Quezon City Central (Tandang Sora)', 5, 'aligned reading date', '', 'uploads/dr_pos/dr_pos_4_1_1770832793_698cc399b560f_01.22.2026_QUOTE_PERF_Copieronline_BIR_Revenue_Reg_5_550_671.00.pdf', 1, 'ACTIVE', '2026-02-12 01:59:53', '2026-02-13 12:55:39', NULL);
 
 -- --------------------------------------------------------
 
@@ -182,18 +187,18 @@ CREATE TABLE `zoning_zone` (
 --
 
 INSERT INTO `zoning_zone` (`id`, `zone_number`, `area_center`, `reading_date`, `latitude`, `longitude`, `created_at`) VALUES
-(1, 1, 'CaMaNaVa Area', 3, 14.664369, 120.961845, '2026-01-28 15:22:00'),
-(2, 2, 'Caloocan South', 4, 14.668687, 120.997894, '2026-01-28 15:22:00'),
-(3, 3, 'Quezon City North (Fairview Area)', 5, 14.733526, 121.040209, '2026-01-28 15:22:00'),
-(4, 4, 'Quezon City Central (Tandang Sora)', 6, 14.674216, 121.046854, '2026-01-28 15:22:00'),
-(5, 5, 'Quezon City South / East (Diliman)', 7, 14.636491, 121.048407, '2026-01-28 15:22:00'),
-(6, 6, 'Pasig / Marikina Area', 8, 14.594300, 121.073470, '2026-01-28 15:22:00'),
+(1, 1, 'Quezon City North (Fairview Area)', 3, 14.733526, 121.040209, '2026-01-28 15:22:00'),
+(2, 2, 'CaMaNaVa Area', 4, 14.664369, 120.961845, '2026-01-28 15:22:00'),
+(3, 3, 'Quezon City Central (Tandang Sora)', 5, 14.674216, 121.046854, '2026-01-28 15:22:00'),
+(4, 4, 'Quezon City South / East (Diliman)', 6, 14.636491, 121.048407, '2026-01-28 15:22:00'),
+(5, 5, 'Pasig / Marikina Area', 7, 14.594300, 121.073470, '2026-01-28 15:22:00'),
+(6, 6, 'San Juan Area', 8, 14.604399, 121.032494, '2026-01-28 15:22:00'),
 (7, 7, 'Manila City (Rizal Park / City Hall)', 9, 14.592141, 120.980258, '2026-01-28 15:22:00'),
 (8, 8, 'Makati City (Ayala Center)', 10, 14.554406, 121.019612, '2026-01-28 15:22:00'),
 (9, 9, 'Pasay (NAIA Area)', 11, 14.527321, 120.999184, '2026-01-28 15:22:00'),
 (10, 10, 'Taguig (BGC Area)', 12, 14.533303, 121.051541, '2026-01-28 15:22:00'),
-(11, 11, 'Parañaque Area', 13, 14.483479, 121.032642, '2026-01-28 15:22:00'),
-(12, 12, 'Las Piñas Area', 14, 14.473842, 120.978020, '2026-01-28 15:22:00');
+(11, 11, 'Parañaque Area', 13, 14.490035, 121.022068, '2026-01-28 15:22:00'),
+(12, 12, 'Alabang Area', 14, 14.423069, 121.023166, '2026-01-28 15:22:00');
 
 --
 -- Indexes for dumped tables
@@ -258,13 +263,13 @@ ALTER TABLE `clients`
 -- AUTO_INCREMENT for table `contracts`
 --
 ALTER TABLE `contracts`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
 
 --
 -- AUTO_INCREMENT for table `contract_machines`
 --
 ALTER TABLE `contract_machines`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
 
 --
 -- AUTO_INCREMENT for table `zoning_zone`
