@@ -6,9 +6,9 @@ $status = isset($_GET['status']) ? $_GET['status'] : '';
 $zone = isset($_GET['zone']) ? intval($_GET['zone']) : 0;
 
 $query = "SELECT cm.*, c.contract_number, cl.company_name, cl.classification 
-          FROM contract_machines cm
-          JOIN contracts c ON cm.contract_id = c.id
-          JOIN clients cl ON c.client_id = cl.id
+          FROM rental_contract_machines cm
+          JOIN rental_contracts c ON cm.contract_id = c.id
+          JOIN rental_clients cl ON c.client_id = cl.id
           WHERE 1=1";
 
 $params = [];
@@ -45,7 +45,7 @@ $stmt->execute();
 $machines = $stmt->get_result();
 
 // Get zones for filter
-$zones = $conn->query("SELECT * FROM zoning_zone ORDER BY zone_number");
+$zones = $conn->query("SELECT * FROM rental_zoning_zone ORDER BY zone_number");
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -414,14 +414,14 @@ $zones = $conn->query("SELECT * FROM zoning_zone ORDER BY zone_number");
                 🖨️ All Machines
                 <span style="font-size: 16px; background: #e3f2fd; padding: 5px 15px; border-radius: 25px; color: #1976d2;">
                     <?php 
-                    $total = $conn->query("SELECT COUNT(*) as count FROM contract_machines WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
+                    $total = $conn->query("SELECT COUNT(*) as count FROM rental_contract_machines WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
                     echo $total . ' Active';
                     ?>
                 </span>
             </h1>
             <div>
-                <a href="dashboard.php" class="btn btn-secondary">← Dashboard</a>
-                <a href="view_contracts.php" class="btn">📋 Contracts</a>
+                <a href="r-dashboard.php" class="btn btn-secondary">← Dashboard</a>
+                <a href="r-view_contracts.php" class="btn">📋 Contracts</a>
             </div>
         </div>
         
@@ -457,7 +457,7 @@ $zones = $conn->query("SELECT * FROM zoning_zone ORDER BY zone_number");
                 </div>
                 <div class="filter-group" style="display: flex; gap: 10px; align-items: center;">
                     <button type="submit" class="btn">Apply Filters</button>
-                    <a href="view_all_machines.php" class="btn btn-secondary">Clear</a>
+                    <a href="r-view_all_machines.php" class="btn btn-secondary">Clear</a>
                 </div>
             </form>
         </div>
@@ -553,7 +553,7 @@ $zones = $conn->query("SELECT * FROM zoning_zone ORDER BY zone_number");
                                             📑 View All (<?php echo $drpos_count; ?>)
                                         </button>
                                     <?php endif; ?>
-                                    <a href="upload_drpos.php?machine_id=<?php echo $machine['id']; ?>" 
+                                    <a href="r-upload_drpos.php?machine_id=<?php echo $machine['id']; ?>" 
                                        class="drpos-btn" style="background: #27ae60; text-decoration: none;">
                                         ➕ Add
                                     </a>
@@ -562,14 +562,14 @@ $zones = $conn->query("SELECT * FROM zoning_zone ORDER BY zone_number");
                                 <p style="display: flex; align-items: center; gap: 8px;">
                                     <strong>🧾 DR/POS:</strong>
                                     <span style="color: #7f8c8d;">No receipts</span>
-                                    <a href="upload_drpos.php?machine_id=<?php echo $machine['id']; ?>" 
+                                    <a href="r-upload_drpos.php?machine_id=<?php echo $machine['id']; ?>" 
                                        class="drpos-btn" style="background: #27ae60; text-decoration: none;">
                                         ➕ Add Receipt
                                     </a>
                                 </p>
                             <?php endif; ?>
                             
-                            <a href="edit_machine.php?id=<?php echo $machine['id']; ?>" class="action-link">
+                            <a href="r-edit_machine.php?id=<?php echo $machine['id']; ?>" class="action-link">
                                 ✏️ Edit Machine
                             </a>
                         </div>
@@ -580,8 +580,8 @@ $zones = $conn->query("SELECT * FROM zoning_zone ORDER BY zone_number");
                     <span style="font-size: 64px;">🔍</span>
                     <h3>No Machines Found</h3>
                     <p>Try adjusting your filters or add a new machine to a contract.</p>
-                    <a href="view_contracts.php" class="btn">View Contracts</a>
-                    <a href="view_all_machines.php" class="btn btn-secondary">Clear Filters</a>
+                    <a href="r-view_contracts.php" class="btn">View Contracts</a>
+                    <a href="r-view_all_machines.php" class="btn btn-secondary">Clear Filters</a>
                 </div>
             <?php endif; ?>
         </div>

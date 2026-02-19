@@ -11,9 +11,9 @@ $date_to = isset($_GET['date_to']) ? $_GET['date_to'] : '';
 
 // Build query with filters
 $query = "SELECT c.*, cl.company_name, cl.classification as client_classification, 
-                 (SELECT COUNT(*) FROM contract_machines WHERE contract_id = c.id) as machine_count
-          FROM contracts c
-          JOIN clients cl ON c.client_id = cl.id
+                 (SELECT COUNT(*) FROM rental_contract_machines WHERE contract_id = c.id) as machine_count
+          FROM rental_contracts c
+          JOIN rental_clients cl ON c.client_id = cl.id
           WHERE 1=1";
 
 $params = [];
@@ -302,27 +302,27 @@ $contracts = $stmt->get_result();
                     📋 Contracts Management
                     <span style="font-size: 16px; background: #e3f2fd; padding: 5px 15px; border-radius: 25px; color: #1976d2;">
                         <?php 
-                        $total = $conn->query("SELECT COUNT(*) as count FROM contracts")->fetch_assoc()['count'];
+                        $total = $conn->query("SELECT COUNT(*) as count FROM rental_contracts")->fetch_assoc()['count'];
                         echo $total . ' Total';
                         ?>
                     </span>
                 </h1>
             </div>
             <div>
-                <a href="add_contracts.php" class="btn btn-success">➕ New Contract</a>
-                <a href="dashboard.php" class="btn btn-info">📊 Dashboard</a>
-                <a href="calendar.php" class="btn btn-purple">📅 Calendar</a>
+                <a href="r-add_contracts.php" class="btn btn-success">➕ New Contract</a>
+                <a href="r-dashboard.php" class="btn btn-info">📊 Dashboard</a>
+                <a href="r-calendar.php" class="btn btn-purple">📅 Calendar</a>
             </div>
         </div>
 
         <!-- Summary Cards -->
         <?php
-        $active_contracts = $conn->query("SELECT COUNT(*) as count FROM contracts WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
-        $umbrella_contracts = $conn->query("SELECT COUNT(*) as count FROM contracts WHERE type_of_contract = 'UMBRELLA'")->fetch_assoc()['count'];
-        $single_contracts = $conn->query("SELECT COUNT(*) as count FROM contracts WHERE type_of_contract = 'SINGLE CONTRACT'")->fetch_assoc()['count'];
+        $active_contracts = $conn->query("SELECT COUNT(*) as count FROM rental_contracts WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
+        $umbrella_contracts = $conn->query("SELECT COUNT(*) as count FROM rental_contracts WHERE type_of_contract = 'UMBRELLA'")->fetch_assoc()['count'];
+        $single_contracts = $conn->query("SELECT COUNT(*) as count FROM rental_contracts WHERE type_of_contract = 'SINGLE CONTRACT'")->fetch_assoc()['count'];
         $government_contracts = $conn->query("
-            SELECT COUNT(*) as count FROM contracts c 
-            JOIN clients cl ON c.client_id = cl.id 
+            SELECT COUNT(*) as count FROM rental_contracts c 
+            JOIN rental_clients cl ON c.client_id = cl.id 
             WHERE cl.classification = 'GOVERNMENT'
         ")->fetch_assoc()['count'];
         ?>
@@ -383,7 +383,7 @@ $contracts = $stmt->get_result();
                 </div>
                 <div class="filter-group" style="display: flex; flex-direction: row; gap: 10px; align-items: center;">
                     <button type="submit" class="btn">Apply Filters</button>
-                    <a href="view_contracts.php" class="btn" style="background: #95a5a6;">Clear</a>
+                    <a href="r-view_contracts.php" class="btn" style="background: #95a5a6;">Clear</a>
                 </div>
             </form>
         </div>
@@ -463,7 +463,7 @@ $contracts = $stmt->get_result();
                                     <?php endif; ?>
                                 </td>
                                 <td style="text-align: center;">
-                                    <a href="view_machines.php?contract_id=<?php echo $contract['id']; ?>" 
+                                    <a href="r-view_machines.php?contract_id=<?php echo $contract['id']; ?>" 
                                        style="text-decoration: none; display: inline-block;">
                                         <span style="color: black; padding: 5px 12px;  font-weight: 600; font-size: 12px;">
                                             <?php echo $contract['machine_count']; ?> Machine/s
@@ -524,7 +524,7 @@ $contracts = $stmt->get_result();
                                                         📑 View Files (<?php echo $file_count; ?>)
                                                     </button>
                                                 <?php endif; ?>
-                                                <a href="upload_contract_file.php?contract_id=<?php echo $contract['id']; ?>" 
+                                                <a href="r-upload_contract_file.php?contract_id=<?php echo $contract['id']; ?>" 
                                                 class="action-btn" style="background: #27ae60; padding: 4px 10px; font-size: 11px;">
                                                     ➕ Add
                                                 </a>
@@ -533,7 +533,7 @@ $contracts = $stmt->get_result();
                                     <?php else: ?>
                                         <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
                                             <span style="color: #7f8c8d; font-size: 11px; margin-bottom: 5px;">No file</span>
-                                            <a href="upload_contract_file.php?contract_id=<?php echo $contract['id']; ?>" 
+                                            <a href="r-upload_contract_file.php?contract_id=<?php echo $contract['id']; ?>" 
                                             class="action-btn" style="background: #27ae60; padding: 6px 15px; font-size: 12px; text-decoration: none;">
                                                 ➕ Add Contract File
                                             </a>
@@ -547,10 +547,10 @@ $contracts = $stmt->get_result();
                                 </td>
                                 <td>
                                     <div class="action-buttons">
-                                        <a href="edit_contract.php?id=<?php echo $contract['id']; ?>" class="action-btn" style="background: #f39c12;">
+                                        <a href="r-edit_contract.php?id=<?php echo $contract['id']; ?>" class="action-btn" style="background: #f39c12;">
                                             ✏️ Edit
                                         </a>
-                                        <a href="view_machines.php?contract_id=<?php echo $contract['id']; ?>" class="action-btn" style="background: #3498db;">
+                                        <a href="r-view_machines.php?contract_id=<?php echo $contract['id']; ?>" class="action-btn" style="background: #3498db;">
                                             🖨️ Machines
                                         </a>
                                         <?php if ($contract['status'] == 'ACTIVE'): ?>
@@ -572,7 +572,7 @@ $contracts = $stmt->get_result();
                                 <span style="font-size: 48px;">📄</span>
                                 <h3 style="color: #2c3e50; margin-top: 20px; margin-bottom: 10px;">No Contracts Found</h3>
                                 <p style="color: #7f8c8d; margin-bottom: 20px;">Try adjusting your filters or create a new contract.</p>
-                                <a href="add_contracts.php" class="btn btn-success">➕ New Contract</a>
+                                <a href="r-add_contracts.php" class="btn btn-success">➕ New Contract</a>
                             </td>
                         </tr>
                     <?php endif; ?>
@@ -730,7 +730,7 @@ $contracts = $stmt->get_result();
         // Update contract status
         function updateStatus(contractId, newStatus) {
             if (confirm(`Are you sure you want to ${newStatus === 'ACTIVE' ? 'activate' : 'deactivate'} this contract?`)) {
-                fetch('update_contract_status.php', {
+                fetch('r-update_contract_status.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: contractId, status: newStatus })

@@ -8,6 +8,57 @@ ini_set('log_errors', 1);
 // Start output buffering to catch any unexpected output
 ob_start();
 
+// Get distinct cities FROM rental_zone_coordinates for dropdown
+$cities_query = $conn->query("SELECT DISTINCT city FROM rental_zone_coordinates WHERE city IS NOT NULL AND city != '' ORDER BY city");
+$cities = [];
+while ($city_row = $cities_query->fetch_assoc()) {
+    $cities[] = $city_row['city'];
+}
+
+// Handle AJAX request for barangay suggestions - THIS MUST COME FIRST
+if (isset($_GET['get_barangays'])) {
+    header('Content-Type: application/json');
+    
+    $city = trim($_GET['city'] ?? '');
+    $search = trim($_GET['search'] ?? '');
+    
+    if (empty($city)) {
+        echo json_encode(['success' => false, 'error' => 'City is required']);
+        exit;
+    }
+    
+    $query = "SELECT barangay FROM rental_zone_coordinates WHERE LOWER(city) = LOWER(?)";
+    $params = [$city];
+    $types = "s";
+    
+    if (!empty($search)) {
+        $query .= " AND LOWER(barangay) LIKE LOWER(?)";
+        $params[] = "%$search%";
+        $types .= "s";
+    }
+    
+    $query .= " ORDER BY barangay LIMIT 20";
+    
+    $stmt = $conn->prepare($query);
+    if (!$stmt) {
+        echo json_encode(['success' => false, 'error' => 'Database error: ' . $conn->error]);
+        exit;
+    }
+    
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $barangays = [];
+    while ($row = $result->fetch_assoc()) {
+        $barangays[] = $row['barangay'];
+    }
+    
+    echo json_encode(['success' => true, 'barangays' => $barangays]);
+    exit;
+}
+
+// NOW validate contract and client
 $contract_id = isset($_GET['contract_id']) ? intval($_GET['contract_id']) : 0;
 $contract_type = isset($_GET['type']) ? $_GET['type'] : '';
 $client_id = isset($_GET['client_id']) ? intval($_GET['client_id']) : 0;
@@ -19,8 +70,8 @@ if (!$contract_id || !$client_id) {
 // Get contract and client information
 $contract_query = $conn->query("
     SELECT c.*, cl.classification, cl.company_name, cl.status 
-    FROM contracts c
-    JOIN clients cl ON c.client_id = cl.id
+    FROM rental_contracts c
+    JOIN rental_clients cl ON c.client_id = cl.id
     WHERE c.id = $contract_id
 ");
 $contract_data = $contract_query->fetch_assoc();
@@ -59,6 +110,88 @@ function getZoneReadingDate($zone_number) {
     return $zone_number + 2;
 }
 
+// Function to calculate distance between two points (Haversine formula)
+function calculateDistance($lat1, $lon1, $lat2, $lon2) {
+    $earthRadius = 6371;
+    $lat1 = deg2rad($lat1);
+    $lon1 = deg2rad($lon1);
+    $lat2 = deg2rad($lat2);
+    $lon2 = deg2rad($lon2);
+    $latDelta = $lat2 - $lat1;
+    $lonDelta = $lon2 - $lon1;
+    $angle = 2 * asin(sqrt(pow(sin($latDelta / 2), 2) + cos($lat1) * cos($lat2) * pow(sin($lonDelta / 2), 2)));
+    return $angle * $earthRadius;
+}
+
+// Function to get zone from barangay and city using zone_coordinates
+function getZoneFromBarangay($barangay, $city, $conn) {
+    // First, check if barangay exists in zone_coordinates
+    $stmt = $conn->prepare("
+        SELECT latitude, longitude 
+        FROM rental_zone_coordinates 
+        WHERE LOWER(barangay) = LOWER(?) AND LOWER(city) = LOWER(?)
+        LIMIT 1
+    ");
+    
+    if (!$stmt) {
+        return ['success' => false, 'error' => 'Database error'];
+    }
+    
+    $stmt->bind_param("ss", $barangay, $city);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows === 0) {
+        return ['success' => false, 'error' => 'barangay_not_found'];
+    }
+    
+    // Get the coordinates of the searched barangay
+    $location = $result->fetch_assoc();
+    $lat = floatval($location['latitude']);
+    $lng = floatval($location['longitude']);
+    
+    // Find nearest zone using distance calculation
+    $zone_stmt = $conn->prepare("
+        SELECT id, zone_number, area_center, reading_date, latitude, longitude,
+               (6371 * acos(cos(radians(?)) * cos(radians(latitude)) 
+               * cos(radians(longitude) - radians(?)) 
+               + sin(radians(?)) * sin(radians(latitude)))) AS distance
+        FROM rental_zoning_zones 
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        ORDER BY distance ASC 
+        LIMIT 1
+    ");
+    
+    if (!$zone_stmt) {
+        return ['success' => false, 'error' => 'Database error'];
+    }
+    
+    $zone_stmt->bind_param("ddd", $lat, $lng, $lat);
+    $zone_stmt->execute();
+    $zone_result = $zone_stmt->get_result();
+    
+    if ($zone_result->num_rows > 0) {
+        $zone = $zone_result->fetch_assoc();
+        $distance = calculateDistance($lat, $lng, $zone['latitude'], $zone['longitude']);
+        
+        return [
+            'success' => true,
+            'zone_id' => $zone['id'],
+            'zone_number' => $zone['zone_number'],
+            'area_center' => $zone['area_center'],
+            'reading_date' => $zone['reading_date'],
+            'latitude' => $lat,
+            'longitude' => $lng,
+            'zone_lat' => $zone['latitude'],
+            'zone_lon' => $zone['longitude'],
+            'distance_km' => round($distance, 2),
+            'source' => 'zone_coordinates'
+        ];
+    }
+    
+    return ['success' => false, 'error' => 'No zones found'];
+}
+
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
     $conn->begin_transaction();
@@ -87,67 +220,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
                 continue;
             }
             
-            // Get zone data from location
-            $barangay = $_POST['barangay'][$i];
-            $city = $_POST['city'][$i];
+            // Get zone data from barangay and city using zone_coordinates
+            $barangay = trim($_POST['barangay'][$i]);
+            $city = trim($_POST['city'][$i]);
             
-            // Call get_zone_from_location.php to get zone data
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, 'get_zone_from_location.php');
-            curl_setopt($ch, CURLOPT_POST, 1);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
-                'barangay' => $barangay,
-                'city' => $city,
-                'client_id' => $client_id
-            ]));
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_HEADER, false);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+            $zone_result = getZoneFromBarangay($barangay, $city, $conn);
             
-            $response = curl_exec($ch);
-            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            
-            if ($http_code === 200) {
-                $zone_data = json_decode($response, true);
-            } else {
-                error_log("Failed to get zone data: HTTP $http_code");
-                $zone_data = ['success' => false];
-            }
-            
-            // Fallback if API call fails
-            if (!$zone_data || !$zone_data['success']) {
-                // Use city fallback logic
-                $city_lower = strtolower(trim($city));
-                $zone_mapping = [
-                    'manila' => 1, 'caloocan' => 2, 'quezon city' => 3,
-                    'pasig' => 6, 'mandaluyong' => 7, 'san juan' => 7,
-                    'makati' => 8, 'taguig' => 9, 'parañaque' => 10,
-                    'las piñas' => 10, 'pasay' => 11, 'valenzuela' => 12
-                ];
-                
-                $zone_number = 1;
-                foreach ($zone_mapping as $key => $num) {
-                    if (strpos($city_lower, $key) !== false) {
-                        $zone_number = $num;
-                        break;
-                    }
+            if (!$zone_result['success']) {
+                if ($zone_result['error'] === 'barangay_not_found') {
+                    $errors[] = "Barangay '{$barangay}' in '{$city}' not found in database. Please contact administrator.";
+                } else {
+                    $errors[] = "Could not determine zone for Machine " . ($i + 1) . ": " . $zone_result['error'];
                 }
-                
-                $zone_query = $conn->query("SELECT id, zone_number, area_center FROM zoning_zone WHERE zone_number = $zone_number LIMIT 1");
-                $zone = $zone_query->fetch_assoc();
-                
-                $zone_data = [
-                    'zone_id' => $zone['id'],
-                    'zone_number' => $zone['zone_number'],
-                    'area_center' => $zone['area_center'],
-                    'source' => 'local_fallback'
-                ];
+                continue;
             }
             
-            $zone_id = $zone_data['zone_id'];
-            $zone_number = $zone_data['zone_number'];
-            $area_center = $conn->real_escape_string($zone_data['area_center']);
+            $zone_id = $zone_result['zone_id'];
+            $zone_number = $zone_result['zone_number'];
+            $area_center = $conn->real_escape_string($zone_result['area_center']);
             
             // Get reading date
             $user_reading_date = isset($_POST['reading_date'][$i]) ? intval($_POST['reading_date'][$i]) : 0;
@@ -189,7 +279,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
                 ? $conn->real_escape_string($_POST['comments'][$i]) 
                 : '';
             
-            // Handle DR/POS file uploads - FIXED: Check if files exist for this machine index
+            // Handle DR/POS file uploads
             $dr_pos_files = [];
             $dr_pos_file_count = 0;
             
@@ -231,8 +321,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
             
             $dr_pos_files_str = !empty($dr_pos_files) ? "'" . $conn->real_escape_string(implode(',', $dr_pos_files)) . "'" : 'NULL';
             
-            // Build SQL statement - FIXED: Properly handle NULL values and string escaping
-            $sql = "INSERT INTO contract_machines (
+            // Build SQL statement
+            $sql = "INSERT INTO rental_contract_machines (
                 contract_id, client_id, department, machine_type, machine_model, machine_brand,
                 machine_serial_number, machine_number, mono_meter_start, color_meter_start,
                 building_number, street_name, barangay, city, zone_id, zone_number,
@@ -271,7 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
             
             if ($conn->query($sql)) {
                 $success_count++;
-                error_log("Machine $i inserted successfully. ID: " . $conn->insert_id . ", DR/POS files: $dr_pos_file_count");
+                error_log("Machine $i inserted successfully. ID: " . $conn->insert_id . ", Zone: $zone_number, DR/POS files: $dr_pos_file_count");
             } else {
                 $errors[] = "Failed to insert Machine " . ($i + 1) . ": " . $conn->error;
                 error_log("Failed to insert machine $i: " . $conn->error);
@@ -293,7 +383,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
             
             // Update contract with collection date
             $conn->query("
-                UPDATE contracts 
+                UPDATE rental_contracts 
                 SET collection_date = $collection_date 
                 WHERE id = $contract_id
             ");
@@ -307,12 +397,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_machines'])) {
             sendJsonSuccess([
                 'success_count' => $success_count,
                 'warnings' => $errors,
-                'redirect' => 'view_contracts.php'
+                'redirect' => 'r-view_contracts.php'
             ]);
         } else {
             sendJsonSuccess([
                 'success_count' => $success_count,
-                'redirect' => 'view_contracts.php'
+                'redirect' => 'r-view_contracts.php'
             ]);
         }
         
@@ -336,6 +426,9 @@ $contract_number = htmlspecialchars($contract_data['contract_number']);
 // Determine max machines based on contract type
 $max_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 100;
 $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
+
+// Encode cities for JavaScript
+$cities_json = json_encode($cities);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -356,7 +449,11 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             border-left: 4px solid #2196F3; border: 1px solid #ddd;
         }
         .form-row { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
-        .form-group { flex: 1 1 calc(50% - 15px); min-width: 200px; }
+        .form-group { 
+            flex: 1 1 calc(50% - 15px); 
+            min-width: 200px; 
+            position: relative;
+        }
         label { display: block; margin-bottom: 5px; font-weight: bold; color: #34495e; font-size: 13px; }
         .required:after { content: " *"; color: #e74c3c; }
         input[type="text"], input[type="number"], select, textarea {
@@ -366,6 +463,10 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             border-color: #2196F3; outline: none; box-shadow: 0 0 3px rgba(33,150,243,0.3);
         }
         input[readonly] { background: #f5f5f5; color: #666; }
+        select:disabled {
+            background: #f5f5f5;
+            cursor: not-allowed;
+        }
         .btn-add, .btn-submit { 
             background: #27ae60; color: white; padding: 10px 20px; border: none; 
             border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.3s;
@@ -382,6 +483,7 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
         .zone-display { 
             background: #e8f5e9; padding: 12px; border-radius: 4px; margin: 10px 0;
             border-left: 4px solid #4CAF50; font-size: 13px;
+            position: relative;
         }
         .zone-display.misaligned {
             background: #fff3e0;
@@ -398,10 +500,14 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
         .aligned-badge.aligned { background: #d4edda; color: #155724; }
         .aligned-badge.misaligned { background: #fff3cd; color: #856404; }
         .hidden { display: none; }
-        .loading {
-            display: inline-block; width: 16px; height: 16px;
-            border: 2px solid #f3f3f3; border-top: 2px solid #2196F3;
-            border-radius: 50%; animation: spin 1s linear infinite;
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #2196F3;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
             margin-right: 5px;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -413,8 +519,12 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
         .message.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .message.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .source-badge {
-            display: inline-block; padding: 2px 6px; background: #e9ecef;
-            border-radius: 3px; font-size: 10px; color: #495057;
+            display: inline-block;
+            padding: 2px 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            font-size: 10px;
+            color: #495057;
             margin-left: 8px;
         }
         
@@ -490,6 +600,135 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             font-size: 11px;
             margin-left: 8px;
         }
+        
+        /* Autocomplete Styles */
+        .autocomplete-suggestions {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 200px;
+            overflow-y: auto;
+            background: white;
+            border: 2px solid #2196F3;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        
+        .autocomplete-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        .autocomplete-item:hover {
+            background: #e3f2fd;
+        }
+        
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+        
+        .autocomplete-item.active {
+            background: #bbdefb;
+        }
+        
+        .no-suggestions {
+            padding: 10px;
+            color: #7f8c8d;
+            text-align: center;
+            font-style: italic;
+        }
+        
+        /* Barangay error */
+        .barangay-error {
+            color: #e74c3c;
+            font-size: 12px;
+            margin-top: 5px;
+            padding: 5px;
+            background: #fdeaea;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .validation-success {
+            color: #27ae60;
+            font-size: 12px;
+            margin-top: 5px;
+            display: none;
+        }
+        
+        .hint-text {
+            font-size: 11px;
+            color: #7f8c8d;
+            margin-top: 3px;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        
+        /* Checkmark Animation */
+        .checkmark {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #27ae60;
+            transform: scale(0);
+            animation: checkmark-pop 0.3s ease forwards;
+            position: relative;
+            margin-right: 5px;
+            flex-shrink: 0;
+        }
+
+        .checkmark::after {
+            content: '';
+            position: absolute;
+            top: 4px;
+            left: 7px;
+            width: 5px;
+            height: 10px;
+            border: solid white;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
+        }
+
+        @keyframes checkmark-pop {
+            0% { transform: scale(0); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        /* Success badge for zone info */
+        .success-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: #d4edda;
+            color: #155724;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 5px;
+        }
+
+        /* Zone info container */
+        .zone-info-content {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .zone-details {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
     </style>
 </head>
 <body>
@@ -548,6 +787,11 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
         const contractType = '<?php echo $contract_type; ?>';
         const classification = '<?php echo $classification; ?>';
         const clientId = <?php echo $client_id; ?>;
+        const cities = <?php echo $cities_json; ?>;
+        
+        // Store validation status and autocomplete timeouts for each machine
+        const zoneValidationStatus = {};
+        const searchTimeouts = {};
         
         // Initialize form based on contract type
         document.addEventListener('DOMContentLoaded', function() {
@@ -558,6 +802,18 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             }
             
             document.getElementById('machinesForm').addEventListener('submit', handleFormSubmit);
+            
+            // Close suggestions when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.barangay-autocomplete')) {
+                    for (let i = 0; i < machineCount; i++) {
+                        const suggestions = document.getElementById(`barangay_suggestions_${i}`);
+                        if (suggestions) {
+                            suggestions.style.display = 'none';
+                        }
+                    }
+                }
+            });
         });
         
         function generateMachineFields() {
@@ -593,6 +849,15 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             entry.id = `machine_${machineCount}`;
             
             const currentIndex = machineCount;
+            
+            // Initialize validation status
+            zoneValidationStatus[currentIndex] = false;
+            
+            // Build city options
+            let cityOptions = '<option value="">-- Select a city --</option>';
+            cities.forEach(city => {
+                cityOptions += `<option value="${city}">${city}</option>`;
+            });
             
             entry.innerHTML = `
                 <h3 style="display: inline-block;">Machine #${currentIndex + 1}</h3>
@@ -662,26 +927,40 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
                 
                 <div class="form-row">
                     <div class="form-group">
+                        <label class="required">City / Municipality</label>
+                        <select name="city[${currentIndex}]" id="city_${currentIndex}" 
+                                onchange="onCityChange(${currentIndex})" required>
+                            ${cityOptions}
+                        </select>
+                    </div>
+                    <div class="form-group barangay-autocomplete" style="position: relative;">
                         <label class="required">Barangay</label>
                         <input type="text" name="barangay[${currentIndex}]" id="barangay_${currentIndex}" 
-                               onblur="getZoneInfo(${currentIndex})" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="required">City</label>
-                        <input type="text" name="city[${currentIndex}]" id="city_${currentIndex}" 
-                               onblur="getZoneInfo(${currentIndex})" required>
+                               placeholder="Start typing to search barangay..." 
+                               autocomplete="off"
+                               disabled
+                               oninput="onBarangayInput(${currentIndex})"
+                               onkeydown="handleBarangayKeydown(${currentIndex}, event)"
+                               required>
+                        <div id="barangay_suggestions_${currentIndex}" class="autocomplete-suggestions"></div>
+                        <div id="barangay_error_${currentIndex}" class="barangay-error"></div>
+                        <div class="hint-text">
+                            <span>🔍</span> Type at least 2 characters to see suggestions
+                        </div>
                     </div>
                 </div>
                 
                 <div id="zone_display_${currentIndex}" class="zone-display hidden">
-                    <span id="zone_loading_${currentIndex}" class="loading hidden"></span>
-                    <span id="zone_info_${currentIndex}"></span>
+                    <div id="zone_loading_${currentIndex}" class="loading-spinner"></div>
+                    <div id="zone_info_${currentIndex}" style="display: inline-block;"></div>
                     <span id="source_badge_${currentIndex}" class="source-badge hidden"></span>
                 </div>
                 
                 <div id="schedule_display_${currentIndex}" class="schedule-display hidden">
                     <span id="schedule_info_${currentIndex}"></span>
                 </div>
+                
+                <div id="validation_status_${currentIndex}" class="validation-success"></div>
                 
                 <input type="hidden" name="zone_id[${currentIndex}]" id="zone_id_${currentIndex}">
                 <input type="hidden" name="zone_number[${currentIndex}]" id="zone_number_${currentIndex}">
@@ -701,7 +980,7 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
                     </div>
                 </div>
                 
-                <!-- DR/POS Receipt Upload Section - FIXED: Added multiple attribute and proper naming -->
+                <!-- DR/POS Receipt Upload Section -->
                 <div style="margin-top: 20px; padding: 15px; background: #fff8e1; border-radius: 8px; border-left: 4px solid #e67e22;">
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
                         <span style="font-size: 20px;">🧾</span>
@@ -730,7 +1009,7 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             
             container.appendChild(entry);
             
-            // Add drag and drop listeners
+            // Add drag and drop listeners for DR/POS
             const uploadArea = document.getElementById(`drpos_upload_${currentIndex}`);
             const fileInput = document.getElementById(`drpos_input_${currentIndex}`);
             
@@ -757,6 +1036,133 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             });
             
             machineCount++;
+        }
+        
+        function onCityChange(index) {
+            const citySelect = document.getElementById(`city_${index}`);
+            const barangayInput = document.getElementById(`barangay_${index}`);
+            const city = citySelect.value;
+            
+            if (city) {
+                barangayInput.disabled = false;
+                barangayInput.value = '';
+                barangayInput.focus();
+                document.getElementById(`barangay_suggestions_${index}`).style.display = 'none';
+                
+                // Reset validation
+                zoneValidationStatus[index] = false;
+                document.getElementById(`validation_status_${index}`).style.display = 'none';
+                
+                // Hide zone display
+                const zoneDisplay = document.getElementById(`zone_display_${index}`);
+                zoneDisplay.classList.add('hidden');
+                
+                // Clear zone info
+                document.getElementById(`zone_info_${index}`).innerHTML = '';
+                document.getElementById(`zone_loading_${index}`).style.display = 'none';
+            } else {
+                barangayInput.disabled = true;
+                barangayInput.value = '';
+            }
+        }
+        
+        function onBarangayInput(index) {
+            const searchTerm = document.getElementById(`barangay_${index}`).value.trim();
+            const city = document.getElementById(`city_${index}`).value;
+            
+            if (!city) {
+                alert('Please select a city first');
+                document.getElementById(`barangay_${index}`).value = '';
+                return;
+            }
+            
+            clearTimeout(searchTimeouts[index]);
+            
+            if (searchTerm.length >= 2) {
+                searchTimeouts[index] = setTimeout(() => {
+                    fetchBarangaySuggestions(searchTerm, city, index);
+                }, 300);
+            } else {
+                document.getElementById(`barangay_suggestions_${index}`).style.display = 'none';
+            }
+        }
+        
+        function fetchBarangaySuggestions(search, city, index) {
+            console.log('Fetching suggestions for:', search, 'in', city);
+            
+            fetch(`r-add_contract_machines.php?get_barangays=1&city=${encodeURIComponent(city)}&search=${encodeURIComponent(search)}`)
+                .then(response => {
+                    console.log('Response status:', response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Suggestions data:', data);
+                    
+                    const suggestionsDiv = document.getElementById(`barangay_suggestions_${index}`);
+                    
+                    if (data.success && data.barangays.length > 0) {
+                        let html = '';
+                        data.barangays.forEach(barangay => {
+                            html += `<div class="autocomplete-item" onclick="selectBarangay('${barangay.replace(/'/g, "\\'")}', ${index})">${barangay}</div>`;
+                        });
+                        suggestionsDiv.innerHTML = html;
+                        suggestionsDiv.style.display = 'block';
+                    } else {
+                        suggestionsDiv.innerHTML = '<div class="no-suggestions">No matching barangay found</div>';
+                        suggestionsDiv.style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching suggestions:', error);
+                });
+        }
+        
+        function selectBarangay(barangay, index) {
+            document.getElementById(`barangay_${index}`).value = barangay;
+            document.getElementById(`barangay_suggestions_${index}`).style.display = 'none';
+            
+            // Trigger zone check after selecting
+            setTimeout(() => {
+                getZoneInfo(index);
+            }, 100);
+        }
+        
+        function handleBarangayKeydown(index, e) {
+            const suggestions = document.getElementById(`barangay_suggestions_${index}`);
+            const items = suggestions.querySelectorAll('.autocomplete-item');
+            
+            if (items.length === 0) return;
+            
+            const active = suggestions.querySelector('.autocomplete-item.active');
+            
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (!active) {
+                    items[0].classList.add('active');
+                } else {
+                    const next = active.nextElementSibling;
+                    if (next && next.classList.contains('autocomplete-item')) {
+                        active.classList.remove('active');
+                        next.classList.add('active');
+                    }
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (!active) {
+                    items[items.length - 1].classList.add('active');
+                } else {
+                    const prev = active.previousElementSibling;
+                    if (prev && prev.classList.contains('autocomplete-item')) {
+                        active.classList.remove('active');
+                        prev.classList.add('active');
+                    }
+                }
+            } else if (e.key === 'Enter' && active) {
+                e.preventDefault();
+                selectBarangay(active.textContent, index);
+            } else if (e.key === 'Escape') {
+                suggestions.style.display = 'none';
+            }
         }
         
         function handleDRPOSFileSelect(index, files) {
@@ -815,8 +1221,6 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
                 fileItem.remove();
             }
             
-            // Clear the file input and re-add remaining files
-            const fileInput = document.getElementById(`drpos_input_${index}`);
             const fileList = document.getElementById(`drpos_file_list_${index}`);
             const remainingFiles = fileList.children.length;
             const fileCountBadge = document.getElementById(`file_count_${index}`);
@@ -827,10 +1231,6 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             } else {
                 fileCountBadge.style.display = 'none';
             }
-            
-            // Note: We can't easily modify the FileList, but the form will still submit
-            // the remaining files because we're not modifying the input.files
-            // This just removes the visual representation
         }
         
         function removeMachineEntry(index) {
@@ -886,7 +1286,9 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
         
         function getZoneInfo(index) {
             const barangay = document.getElementById(`barangay_${index}`).value.trim();
-            const city = document.getElementById(`city_${index}`).value.trim();
+            const city = document.getElementById(`city_${index}`).value;
+            const barangayError = document.getElementById(`barangay_error_${index}`);
+            const validationStatus = document.getElementById(`validation_status_${index}`);
             
             if (!city || !barangay) return;
             
@@ -895,25 +1297,34 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
             const zoneLoading = document.getElementById(`zone_loading_${index}`);
             const sourceBadge = document.getElementById(`source_badge_${index}`);
             
+            // Show the zone display container
             zoneDisplay.classList.remove('hidden');
-            zoneLoading.classList.remove('hidden');
-            zoneInfo.innerHTML = 'Calculating best zone...';
+            
+            // Show loading spinner and clear previous content
+            zoneLoading.style.display = 'inline-block';
+            zoneLoading.innerHTML = ''; // Clear any existing spinner HTML
+            zoneInfo.innerHTML = 'Checking barangay in database...';
             sourceBadge.classList.add('hidden');
+            barangayError.style.display = 'none';
+            validationStatus.style.display = 'none';
             
             const formData = new FormData();
             formData.append('barangay', barangay);
             formData.append('city', city);
             formData.append('client_id', clientId);
+            formData.append('check_zone', '1');
             
-            fetch('get_zone_from_location.php', {
+            fetch('r-get_zone_from_location.php', {
                 method: 'POST',
                 body: formData
             })
             .then(response => response.json())
             .then(data => {
-                zoneLoading.classList.add('hidden');
+                // Hide loading spinner
+                zoneLoading.style.display = 'none';
                 
                 if (data.success) {
+                    // Zone found successfully
                     document.getElementById(`zone_id_${index}`).value = data.zone_id;
                     document.getElementById(`zone_number_${index}`).value = data.zone_number;
                     document.getElementById(`area_center_${index}`).value = data.area_center;
@@ -928,22 +1339,33 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
                         readingDateField.value = recommendedDate;
                     }
                     
-                    let sourceText = '';
-                    switch(data.source) {
-                        case 'database_cache': sourceText = '📍 From cache'; break;
-                        case 'osm': sourceText = '🗺️ Precise location'; break;
-                        case 'city_centroid': sourceText = '🏙️ City center'; break;
-                        case 'city_fallback': sourceText = '📍 City match'; break;
-                        default: sourceText = '📍 Assigned';
-                    }
-                    
+                    // Source is always FROM rental_zone_coordinates now
+                    let sourceText = '📍 From database';
+
+                    // Show zone info with checkmark
                     zoneInfo.innerHTML = `
-                        <strong>Zone ${data.zone_number}</strong> - ${data.area_center}
-                        ${data.distance_km ? `<br><small>Distance: ${data.distance_km} km</small>` : ''}
+                        <div class="zone-info-content">
+                            <div class="zone-details">
+                                <span class="checkmark"></span>
+                                <div>
+                                    <strong>Zone ${data.zone_number}</strong> - ${data.area_center}<br>
+                                    <small>Distance: ${data.distance_km} km</small>
+                                </div>
+                            </div>
+                            <div class="success-badge">
+                                <span>✓ Validated</span>
+                            </div>
+                        </div>
                     `;
-                    
+
                     sourceBadge.innerHTML = sourceText;
                     sourceBadge.classList.remove('hidden');
+                    
+                    validationStatus.innerHTML = '✅ Barangay validated';
+                    validationStatus.style.display = 'block';
+                    validationStatus.style.color = '#27ae60';
+                    
+                    zoneValidationStatus[index] = true;
                     
                     if (classification === 'PRIVATE') {
                         showPrivateSchedule(index, data.zone_number);
@@ -951,15 +1373,27 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
                     
                     checkReadingDateAlignment(index);
                 } else {
-                    zoneInfo.innerHTML = 'Could not determine zone. Please check address.';
+                    // Barangay not found
+                    zoneInfo.innerHTML = 'Barangay not found in database';
                     zoneDisplay.classList.add('misaligned');
+                    
+                    barangayError.innerHTML = '❌ This barangay is not in the database. Please contact administrator.';
+                    barangayError.style.display = 'block';
+                    
+                    validationStatus.innerHTML = '❌ Barangay not validated';
+                    validationStatus.style.display = 'block';
+                    validationStatus.style.color = '#e74c3c';
+                    
+                    zoneValidationStatus[index] = false;
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                zoneLoading.classList.add('hidden');
-                zoneInfo.innerHTML = 'Error calculating zone. Please try again.';
+                zoneLoading.style.display = 'none';
+                zoneInfo.innerHTML = 'Error checking barangay. Please try again.';
                 zoneDisplay.classList.add('misaligned');
+                
+                zoneValidationStatus[index] = false;
             });
         }
         
@@ -1002,20 +1436,26 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
         function handleFormSubmit(e) {
             e.preventDefault();
             
+            // Check if all machines have valid barangays
+            let allValid = true;
+            for (let i = 0; i < machineCount; i++) {
+                if (!zoneValidationStatus[i]) {
+                    allValid = false;
+                    showMessage(`Machine #${i + 1} has invalid barangay. Please check.`, 'error');
+                    break;
+                }
+            }
+            
+            if (!allValid) {
+                return;
+            }
+            
             const submitBtn = document.getElementById('submitBtn');
             submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="loading"></span> Saving...';
+            submitBtn.innerHTML = '<span class="loading-spinner"></span> Saving...';
             
             const formData = new FormData(e.target);
             formData.append('submit_machines', '1');
-            
-            // Log form data for debugging
-            console.log('Submitting form data:');
-            for (let [key, value] of formData.entries()) {
-                if (key.includes('dr_pos_files')) {
-                    console.log(key, '=', value instanceof File ? value.name : value);
-                }
-            }
             
             fetch(window.location.href, {
                 method: 'POST',
@@ -1035,7 +1475,7 @@ $default_machines = ($contract_type == 'SINGLE CONTRACT') ? 1 : 2;
                 if (data.success) {
                     showMessage(`✅ Success! ${data.success_count || 0} machine(s) added successfully.`, 'success');
                     setTimeout(() => {
-                        window.location.href = data.redirect || 'view_contracts.php';
+                        window.location.href = data.redirect || 'r-view_contracts.php';
                     }, 2000);
                 } else {
                     showMessage(`❌ Error: ${data.error || 'Failed to add machines'}`, 'error');

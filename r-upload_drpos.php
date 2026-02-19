@@ -2,39 +2,40 @@
 require_once 'config.php';
 session_start();
 
-$contract_id = isset($_GET['contract_id']) ? intval($_GET['contract_id']) : 0;
+$machine_id = isset($_GET['machine_id']) ? intval($_GET['machine_id']) : 0;
 
-if (!$contract_id) {
-    die("Contract ID is required.");
+if (!$machine_id) {
+    die("Machine ID is required.");
 }
 
-// Get contract info
-$contract_query = $conn->query("
-    SELECT contract_number, company_name, contract_file 
-    FROM contracts c
-    JOIN clients cl ON c.client_id = cl.id
-    WHERE c.id = $contract_id
+// Get machine info
+$machine_query = $conn->query("
+    SELECT cm.*, c.contract_number, cl.company_name 
+    FROM rental_contract_machines cm
+    JOIN rental_contracts c ON cm.contract_id = c.id
+    JOIN rental_clients cl ON cm.client_id = cl.id
+    WHERE cm.id = $machine_id
 ");
-$contract = $contract_query->fetch_assoc();
+$machine = $machine_query->fetch_assoc();
 
-if (!$contract) {
-    die("Contract not found.");
+if (!$machine) {
+    die("Machine not found.");
 }
 
 // Handle file upload
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['contract_files'])) {
-    $upload_dir = 'uploads/contracts/';
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['dr_pos_files'])) {
+    $upload_dir = 'uploads/dr_pos/';
     if (!file_exists($upload_dir)) {
         mkdir($upload_dir, 0777, true);
     }
     
     $uploaded_files = [];
-    $existing_files = !empty($contract['contract_file']) ? explode(',', $contract['contract_file']) : [];
+    $existing_files = !empty($machine['dr_pos_files']) ? explode(',', $machine['dr_pos_files']) : [];
     
     // Handle multiple file upload
-    foreach ($_FILES['contract_files']['tmp_name'] as $key => $tmp_name) {
-        if ($_FILES['contract_files']['error'][$key] == 0) {
-            $file_name = time() . '_' . preg_replace("/[^a-zA-Z0-9.]/", "_", $_FILES['contract_files']['name'][$key]);
+    foreach ($_FILES['dr_pos_files']['tmp_name'] as $key => $tmp_name) {
+        if ($_FILES['dr_pos_files']['error'][$key] == 0) {
+            $file_name = time() . '_' . uniqid() . '_' . preg_replace("/[^a-zA-Z0-9.]/", "_", $_FILES['dr_pos_files']['name'][$key]);
             $file_path = $upload_dir . $file_name;
             
             // Check file type
@@ -45,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['contract_files'])) {
             }
             
             // Check file size (max 10MB)
-            if ($_FILES['contract_files']['size'][$key] > 10 * 1024 * 1024) {
+            if ($_FILES['dr_pos_files']['size'][$key] > 10 * 1024 * 1024) {
                 $error = "File size must be less than 10MB.";
                 continue;
             }
@@ -60,18 +61,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['contract_files'])) {
         // Merge existing files with new files
         $all_files = array_merge($existing_files, $uploaded_files);
         $file_list = implode(',', $all_files);
+        $file_count = count($all_files);
         
-        $update_sql = "UPDATE contracts SET contract_file = '$file_list' WHERE id = $contract_id";
+        $update_sql = "UPDATE rental_contract_machines SET 
+                       dr_pos_files = '$file_list',
+                       dr_pos_file_count = $file_count 
+                       WHERE id = $machine_id";
+        
         if ($conn->query($update_sql)) {
-            $success = count($uploaded_files) . " file(s) uploaded successfully!";
-            // Refresh contract data
-            $contract_query = $conn->query("
-                SELECT contract_number, company_name, contract_file 
-                FROM contracts c
-                JOIN clients cl ON c.client_id = cl.id
-                WHERE c.id = $contract_id
+            $success = count($uploaded_files) . " DR/POS receipt(s) uploaded successfully!";
+            // Refresh machine data
+            $machine_query = $conn->query("
+                SELECT cm.*, c.contract_number, cl.company_name 
+                FROM rental_contract_machines cm
+                JOIN rental_contracts c ON cm.contract_id = c.id
+                JOIN rental_clients cl ON cm.client_id = cl.id
+                WHERE cm.id = $machine_id
             ");
-            $contract = $contract_query->fetch_assoc();
+            $machine = $machine_query->fetch_assoc();
         } else {
             $error = "Error updating database: " . $conn->error;
         }
@@ -81,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['contract_files'])) {
 }
 
 // Get existing files
-$existing_files = !empty($contract['contract_file']) ? explode(',', $contract['contract_file']) : [];
+$existing_files = !empty($machine['dr_pos_files']) ? explode(',', $machine['dr_pos_files']) : [];
 $file_count = count($existing_files);
 ?>
 <!DOCTYPE html>
@@ -89,80 +96,82 @@ $file_count = count($existing_files);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload Contract Files - <?php echo htmlspecialchars($contract['contract_number']); ?></title>
+    <title>Upload DR/POS Receipts - Machine #<?php echo htmlspecialchars($machine['machine_number']); ?></title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            background: #f4f6f9; 
+        /* Copy styles from r-upload_contract_file.php and adapt for DR/POS */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4f6f9;
             padding: 20px;
         }
-        .container { 
-            max-width: 800px; 
-            margin: 0 auto; 
-            background: white; 
-            padding: 30px; 
-            border-radius: 15px; 
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
-        
-        h1 { color: #2c3e50; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
-        h2 { color: #34495e; font-size: 18px; margin: 20px 0 10px; border-bottom: 1px solid #bdc3c7; padding-bottom: 8px; }
-        
-        .contract-info {
-            background: #e3f2fd;
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        h2 {
+            color: #34495e;
+            font-size: 18px;
+            margin: 20px 0 10px;
+            border-bottom: 1px solid #bdc3c7;
+            padding-bottom: 8px;
+        }
+        .machine-info {
+            background: #fff8e1;
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 30px;
-            border-left: 4px solid #3498db;
+            border-left: 4px solid #e67e22;
         }
-        
         .upload-area {
-            border: 2px dashed #3498db;
+            border: 2px dashed #e67e22;
             border-radius: 10px;
             padding: 40px;
             text-align: center;
-            background: #f8f9fa;
+            background: #fff8e1;
             cursor: pointer;
             transition: all 0.3s;
             margin-bottom: 30px;
         }
-        
         .upload-area:hover {
-            border-color: #27ae60;
-            background: #e8f5e9;
+            border-color: #d35400;
+            background: #ffecb3;
         }
-        
         .upload-area.dragover {
             border-color: #27ae60;
             background: #d4edda;
         }
-        
         .upload-icon {
             font-size: 48px;
-            color: #3498db;
+            color: #e67e22;
             margin-bottom: 10px;
         }
-        
         .upload-text {
             font-size: 18px;
             font-weight: 600;
             color: #2c3e50;
             margin-bottom: 5px;
         }
-        
         .upload-subtext {
             font-size: 14px;
             color: #7f8c8d;
         }
-        
         .file-list {
             background: #f8f9fa;
             border-radius: 8px;
             padding: 20px;
             margin-bottom: 30px;
         }
-        
         .file-item {
             display: flex;
             justify-content: space-between;
@@ -171,37 +180,31 @@ $file_count = count($existing_files);
             background: white;
             border-radius: 6px;
             margin-bottom: 8px;
-            border-left: 4px solid #3498db;
+            border-left: 4px solid #e67e22;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
-        
         .file-info {
             display: flex;
             align-items: center;
             gap: 12px;
         }
-        
         .file-icon {
             font-size: 24px;
-            color: #e74c3c;
+            color: #e67e22;
         }
-        
         .file-name {
             font-weight: 600;
             color: #2c3e50;
         }
-        
         .file-size {
             font-size: 11px;
             color: #7f8c8d;
             margin-left: 10px;
         }
-        
         .file-actions {
             display: flex;
             gap: 8px;
         }
-        
         .btn {
             padding: 10px 20px;
             border: none;
@@ -215,18 +218,29 @@ $file_count = count($existing_files);
             align-items: center;
             gap: 8px;
         }
-        
-        .btn-primary { background: #3498db; color: white; }
-        .btn-primary:hover { background: #2980b9; }
+        .btn-primary { background: #e67e22; color: white; }
+        .btn-primary:hover { background: #d35400; }
         .btn-success { background: #27ae60; color: white; }
         .btn-success:hover { background: #229954; }
         .btn-danger { background: #e74c3c; color: white; }
         .btn-danger:hover { background: #c0392b; }
-        .btn-warning { background: #f39c12; color: white; }
-        .btn-warning:hover { background: #e67e22; }
         .btn-secondary { background: #95a5a6; color: white; }
         .btn-secondary:hover { background: #7f8c8d; }
-        
+        .message {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
         .selected-files {
             margin-top: 20px;
             padding: 15px;
@@ -234,29 +248,9 @@ $file_count = count($existing_files);
             border-radius: 6px;
             display: none;
         }
-        
         .selected-files.show {
             display: block;
         }
-        
-        .message {
-            padding: 15px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-        }
-        
-        .success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
         .progress {
             width: 100%;
             height: 4px;
@@ -266,47 +260,43 @@ $file_count = count($existing_files);
             overflow: hidden;
             display: none;
         }
-        
         .progress-bar {
             width: 0%;
             height: 100%;
             background: #27ae60;
             transition: width 0.3s;
         }
-        
         .action-buttons {
             display: flex;
             gap: 10px;
             justify-content: flex-end;
             margin-top: 20px;
         }
-        
-        @media (max-width: 768px) {
-            .file-item {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 10px;
-            }
-            
-            .file-actions {
-                width: 100%;
-                justify-content: flex-end;
-            }
+        .file-count-badge {
+            display: inline-block;
+            background: #e67e22;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>
-            📄 Upload Contract Files
-            <span style="font-size: 14px; background: #e3f2fd; padding: 5px 15px; border-radius: 25px; color: #1976d2;">
-                <?php echo $file_count; ?> file(s)
-            </span>
+            🧾 Upload DR/POS Receipts
+            <span class="file-count-badge"><?php echo $file_count; ?> file(s)</span>
         </h1>
         
-        <div class="contract-info">
-            <strong>Contract Number:</strong> <?php echo htmlspecialchars($contract['contract_number']); ?><br>
-            <strong>Client:</strong> <?php echo htmlspecialchars($contract['company_name']); ?>
+        <div class="machine-info">
+            <strong>Contract:</strong> <?php echo htmlspecialchars($machine['contract_number']); ?><br>
+            <strong>Client:</strong> <?php echo htmlspecialchars($machine['company_name']); ?><br>
+            <strong>Machine #:</strong> <?php echo htmlspecialchars($machine['machine_number']); ?> | 
+            <strong>Serial:</strong> <?php echo htmlspecialchars($machine['machine_serial_number']); ?><br>
+            <strong>Location:</strong> <?php echo htmlspecialchars($machine['barangay'] . ', ' . $machine['city']); ?>
         </div>
         
         <?php if (isset($success)): ?>
@@ -319,7 +309,7 @@ $file_count = count($existing_files);
         
         <!-- Existing Files -->
         <?php if (!empty($existing_files)): ?>
-            <h2>📑 Existing Contract Files</h2>
+            <h2>📑 Existing DR/POS Receipts</h2>
             <div class="file-list">
                 <?php foreach ($existing_files as $index => $file): 
                     $file_name = basename($file);
@@ -327,22 +317,22 @@ $file_count = count($existing_files);
                 ?>
                     <div class="file-item">
                         <div class="file-info">
-                            <span class="file-icon">📄</span>
+                            <span class="file-icon">🧾</span>
                             <div>
                                 <span class="file-name"><?php echo htmlspecialchars($file_name); ?></span>
                                 <span class="file-size"><?php echo $file_size; ?></span>
                             </div>
                         </div>
                         <div class="file-actions">
-                            <button onclick="window.open('<?php echo $file; ?>', '_blank')" class="btn" style="padding: 6px 12px; font-size: 12px; background: #3498db;">
+                            <button onclick="window.open('<?php echo $file; ?>', '_blank')" class="btn" style="padding: 6px 12px; font-size: 12px; background: #e67e22;">
                                 👁️ View
                             </button>
                             <a href="<?php echo $file; ?>" download class="btn" style="padding: 6px 12px; font-size: 12px; background: #27ae60;">
                                 ⬇️ Download
                             </a>
-                            <a href="delete_contract_file.php?contract_id=<?php echo $contract_id; ?>&file=<?php echo urlencode($file); ?>" 
+                            <a href="r-delete_drpos.php?machine_id=<?php echo $machine_id; ?>&file=<?php echo urlencode($file); ?>" 
                                class="btn" style="padding: 6px 12px; font-size: 12px; background: #e74c3c;"
-                               onclick="return confirm('Are you sure you want to delete this file?')">
+                               onclick="return confirm('Are you sure you want to delete this receipt?')">
                                 🗑️ Delete
                             </a>
                         </div>
@@ -353,13 +343,13 @@ $file_count = count($existing_files);
         
         <!-- Upload Form -->
         <form id="uploadForm" method="POST" enctype="multipart/form-data">
-            <h2>➕ Add New Files</h2>
+            <h2>➕ Add New Receipts</h2>
             
             <div id="uploadArea" class="upload-area">
-                <div class="upload-icon">📄</div>
-                <div class="upload-text">Click or drag files to upload</div>
-                <div class="upload-subtext">Supported format: PDF (Max 10MB per file)</div>
-                <input type="file" name="contract_files[]" id="fileInput" accept=".pdf" multiple style="display: none;">
+                <div class="upload-icon">🧾</div>
+                <div class="upload-text">Click or drag PDF files to upload</div>
+                <div class="upload-subtext">Supported format: PDF only (Max 10MB per file)</div>
+                <input type="file" name="dr_pos_files[]" id="fileInput" accept=".pdf" multiple style="display: none;">
             </div>
             
             <div id="selectedFiles" class="selected-files">
@@ -372,8 +362,8 @@ $file_count = count($existing_files);
             </div>
             
             <div class="action-buttons">
-                <a href="view_contracts.php" class="btn btn-secondary">← Back to Contracts</a>
-                <button type="submit" class="btn btn-success" id="uploadBtn">📤 Upload Files</button>
+                <a href="r-view_machines.php?contract_id=<?php echo $machine['contract_id']; ?>" class="btn btn-secondary">← Back to Machines</a>
+                <button type="submit" class="btn btn-success" id="uploadBtn">📤 Upload Receipts</button>
             </div>
         </form>
     </div>
@@ -393,7 +383,6 @@ $file_count = count($existing_files);
             fileInput.click();
         });
         
-        // Drag and drop handlers
         uploadArea.addEventListener('dragover', function(e) {
             e.preventDefault();
             this.classList.add('dragover');
@@ -411,7 +400,6 @@ $file_count = count($existing_files);
             handleFileSelect(e.dataTransfer.files);
         });
         
-        // File select handler
         fileInput.addEventListener('change', function(e) {
             handleFileSelect(this.files);
         });
@@ -419,13 +407,29 @@ $file_count = count($existing_files);
         function handleFileSelect(files) {
             if (files.length > 0) {
                 let html = '';
+                let validCount = 0;
+                
                 for (let i = 0; i < files.length; i++) {
                     const file = files[i];
+                    
+                    // Validate file type
+                    if (file.type !== 'application/pdf') {
+                        alert(`File "${file.name}" is not a PDF. Only PDF files are allowed.`);
+                        continue;
+                    }
+                    
+                    // Validate file size
+                    if (file.size > 10 * 1024 * 1024) {
+                        alert(`File "${file.name}" exceeds the 10MB size limit.`);
+                        continue;
+                    }
+                    
+                    validCount++;
                     const fileSize = (file.size / 1024).toFixed(1) + ' KB';
                     html += `
                         <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: white; border-radius: 4px; margin-bottom: 5px;">
                             <div style="display: flex; align-items: center; gap: 10px;">
-                                <span style="color: #e74c3c;">📄</span>
+                                <span style="color: #e67e22;">🧾</span>
                                 <span style="font-weight: 500;">${file.name}</span>
                                 <span style="font-size: 11px; color: #7f8c8d;">${fileSize}</span>
                             </div>
@@ -433,14 +437,18 @@ $file_count = count($existing_files);
                         </div>
                     `;
                 }
-                fileListDiv.innerHTML = html;
-                selectedFilesDiv.classList.add('show');
+                
+                if (validCount > 0) {
+                    fileListDiv.innerHTML = html;
+                    selectedFilesDiv.classList.add('show');
+                } else {
+                    selectedFilesDiv.classList.remove('show');
+                }
             } else {
                 selectedFilesDiv.classList.remove('show');
             }
         }
         
-        // Form submit handler with progress
         uploadForm.addEventListener('submit', function(e) {
             const files = fileInput.files;
             if (files.length === 0) {
@@ -449,26 +457,11 @@ $file_count = count($existing_files);
                 return;
             }
             
-            // Check file types and sizes
-            for (let i = 0; i < files.length; i++) {
-                if (files[i].type !== 'application/pdf') {
-                    e.preventDefault();
-                    alert('Only PDF files are allowed.');
-                    return;
-                }
-                if (files[i].size > 10 * 1024 * 1024) {
-                    e.preventDefault();
-                    alert(`File "${files[i].name}" exceeds the 10MB size limit.`);
-                    return;
-                }
-            }
-            
             // Show progress bar
             progressContainer.style.display = 'block';
             uploadBtn.disabled = true;
             uploadBtn.innerHTML = '⏳ Uploading...';
             
-            // Simulate progress (actual progress would require AJAX)
             let progress = 0;
             const interval = setInterval(() => {
                 progress += 10;

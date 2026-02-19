@@ -9,28 +9,28 @@ $current_date = date('Y-m-d');
 
 // ============== SUMMARY STATISTICS ==============
 // Total Contracts
-$total_contracts = $conn->query("SELECT COUNT(*) as count FROM contracts")->fetch_assoc()['count'];
+$total_contracts = $conn->query("SELECT COUNT(*) as count FROM rental_contracts")->fetch_assoc()['count'];
 
 // Active Contracts
-$active_contracts = $conn->query("SELECT COUNT(*) as count FROM contracts WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
+$active_contracts = $conn->query("SELECT COUNT(*) as count FROM rental_contracts WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
 
 // Total Machines
-$total_machines = $conn->query("SELECT COUNT(*) as count FROM contract_machines")->fetch_assoc()['count'];
+$total_machines = $conn->query("SELECT COUNT(*) as count FROM rental_contract_machines")->fetch_assoc()['count'];
 
 // Active Machines
-$active_machines = $conn->query("SELECT COUNT(*) as count FROM contract_machines WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
+$active_machines = $conn->query("SELECT COUNT(*) as count FROM rental_contract_machines WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
 
 // Total Clients
-$total_clients = $conn->query("SELECT COUNT(*) as count FROM clients")->fetch_assoc()['count'];
+$total_clients = $conn->query("SELECT COUNT(*) as count FROM rental_clients")->fetch_assoc()['count'];
 
 // Active Clients
-$active_clients = $conn->query("SELECT COUNT(*) as count FROM clients WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
+$active_clients = $conn->query("SELECT COUNT(*) as count FROM rental_clients WHERE status = 'ACTIVE'")->fetch_assoc()['count'];
 
 // ============== CONTRACT EXPIRATION STATISTICS ==============
 // Expiring Soon (next 60 days)
 $expiring_soon = $conn->query("
     SELECT COUNT(*) as count 
-    FROM contracts 
+    FROM rental_contracts 
     WHERE contract_end IS NOT NULL 
     AND contract_end BETWEEN '$current_date' AND DATE_ADD('$current_date', INTERVAL 60 DAY)
     AND status = 'ACTIVE'
@@ -39,7 +39,7 @@ $expiring_soon = $conn->query("
 // Expired Contracts
 $expired_contracts = $conn->query("
     SELECT COUNT(*) as count 
-    FROM contracts 
+    FROM rental_contracts 
     WHERE contract_end IS NOT NULL 
     AND contract_end < '$current_date'
     AND status = 'ACTIVE'
@@ -48,7 +48,7 @@ $expired_contracts = $conn->query("
 // Active contracts with end dates this year
 $ending_this_year = $conn->query("
     SELECT COUNT(*) as count 
-    FROM contracts 
+    FROM rental_contracts 
     WHERE YEAR(contract_end) = $current_year
     AND status = 'ACTIVE'
 ")->fetch_assoc()['count'];
@@ -61,8 +61,8 @@ $zone_table_stats = $conn->query("
         z.reading_date,
         COUNT(cm.id) as machine_count,
         COUNT(DISTINCT cm.contract_id) as contract_count
-    FROM zoning_zone z
-    LEFT JOIN contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
+    FROM rental_zoning_zone z
+    LEFT JOIN rental_contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
     GROUP BY z.id
     ORDER BY z.zone_number
 ");
@@ -73,8 +73,8 @@ $classification_stats = $conn->query("
     SELECT 
         cl.classification,
         COUNT(c.id) as contract_count
-    FROM clients cl
-    LEFT JOIN contracts c ON cl.id = c.client_id
+    FROM rental_clients cl
+    LEFT JOIN rental_contracts c ON cl.id = c.client_id
     GROUP BY cl.classification
 ");
 
@@ -90,7 +90,7 @@ $status_stats = $conn->query("
     SELECT 
         status,
         COUNT(*) as count
-    FROM contracts
+    FROM rental_contracts
     GROUP BY status
 ");
 
@@ -113,7 +113,7 @@ $machine_type_stats = $conn->query("
     SELECT 
         machine_type,
         COUNT(*) as count
-    FROM contract_machines
+    FROM rental_contract_machines
     WHERE status = 'ACTIVE'
     GROUP BY machine_type
 ");
@@ -130,7 +130,7 @@ $monthly_contracts = $conn->query("
     SELECT 
         MONTH(datecreated) as month,
         COUNT(*) as count
-    FROM contracts
+    FROM rental_contracts
     WHERE YEAR(datecreated) = $current_year
     GROUP BY MONTH(datecreated)
     ORDER BY month
@@ -153,8 +153,8 @@ $zone_distribution = $conn->query("
         z.zone_number,
         z.area_center,
         COUNT(cm.id) as machine_count
-    FROM zoning_zone z
-    LEFT JOIN contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
+    FROM rental_zoning_zone z
+    LEFT JOIN rental_contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
     GROUP BY z.id
     ORDER BY z.zone_number
 ");
@@ -174,9 +174,9 @@ $top_clients = $conn->query("
         cl.classification,
         COUNT(cm.id) as machine_count,
         COUNT(DISTINCT c.id) as contract_count
-    FROM clients cl
-    JOIN contracts c ON cl.id = c.client_id AND c.status = 'ACTIVE'
-    JOIN contract_machines cm ON c.id = cm.contract_id AND cm.status = 'ACTIVE'
+    FROM rental_clients cl
+    JOIN rental_contracts c ON cl.id = c.client_id AND c.status = 'ACTIVE'
+    JOIN rental_contract_machines cm ON c.id = cm.contract_id AND cm.status = 'ACTIVE'
     GROUP BY cl.id
     ORDER BY machine_count DESC
     LIMIT 5
@@ -192,8 +192,8 @@ $recent_contracts = $conn->query("
         c.contract_end,
         cl.company_name,
         c.datecreated as date
-    FROM contracts c
-    JOIN clients cl ON c.client_id = cl.id
+    FROM rental_contracts c
+    JOIN rental_clients cl ON c.client_id = cl.id
     ORDER BY c.datecreated DESC
     LIMIT 5
 ");
@@ -208,9 +208,9 @@ $recent_machines = $conn->query("
         cm.status,
         cl.company_name,
         cm.datecreated as date
-    FROM contract_machines cm
-    JOIN contracts c ON cm.contract_id = c.id
-    JOIN clients cl ON c.client_id = cl.id
+    FROM rental_contract_machines cm
+    JOIN rental_contracts c ON cm.contract_id = c.id
+    JOIN rental_clients cl ON c.client_id = cl.id
     ORDER BY cm.datecreated DESC
     LIMIT 5
 ");
@@ -220,7 +220,7 @@ $recent_machines = $conn->query("
 $misaligned_machines = $conn->query("
     SELECT 
         COUNT(*) as count
-    FROM contract_machines
+    FROM rental_contract_machines
     WHERE reading_date_remarks = 'mis-aligned reading date'
     AND status = 'ACTIVE'
 ")->fetch_assoc()['count'];
@@ -229,7 +229,7 @@ $misaligned_machines = $conn->query("
 $no_zone_machines = $conn->query("
     SELECT 
         COUNT(*) as count
-    FROM contract_machines
+    FROM rental_contract_machines
     WHERE zone_id IS NULL AND status = 'ACTIVE'
 ")->fetch_assoc()['count'];
 
@@ -237,7 +237,7 @@ $no_zone_machines = $conn->query("
 $missing_collection = $conn->query("
     SELECT 
         COUNT(*) as count
-    FROM contracts
+    FROM rental_contracts
     WHERE (collection_date IS NULL OR collection_date = 0)
     AND status = 'ACTIVE'
 ")->fetch_assoc()['count'];
@@ -246,7 +246,7 @@ $missing_collection = $conn->query("
 $suspended_contracts = $conn->query("
     SELECT 
         COUNT(*) as count
-    FROM contracts
+    FROM rental_contracts
     WHERE status = 'SUSPENDED'
 ")->fetch_assoc()['count'];
 
@@ -254,7 +254,7 @@ $suspended_contracts = $conn->query("
 $ending_today = $conn->query("
     SELECT 
         COUNT(*) as count
-    FROM contracts
+    FROM rental_contracts
     WHERE contract_end = '$current_date'
     AND status = 'ACTIVE'
 ")->fetch_assoc()['count'];
@@ -263,8 +263,8 @@ $ending_today = $conn->query("
 $contracts_no_machines = $conn->query("
     SELECT 
         COUNT(DISTINCT c.id) as count
-    FROM contracts c
-    LEFT JOIN contract_machines cm ON c.id = cm.contract_id
+    FROM rental_contracts c
+    LEFT JOIN rental_contract_machines cm ON c.id = cm.contract_id
     WHERE cm.id IS NULL AND c.status = 'ACTIVE'
 ")->fetch_assoc()['count'];
 
@@ -272,7 +272,7 @@ $contracts_no_machines = $conn->query("
 $expiring_this_month = $conn->query("
     SELECT 
         COUNT(*) as count
-    FROM contracts
+    FROM rental_contracts
     WHERE contract_end IS NOT NULL
     AND MONTH(contract_end) = $current_month
     AND YEAR(contract_end) = $current_year
@@ -283,7 +283,7 @@ $expiring_this_month = $conn->query("
 $expiring_next_month = $conn->query("
     SELECT 
         COUNT(*) as count
-    FROM contracts
+    FROM rental_contracts
     WHERE contract_end IS NOT NULL
     AND MONTH(contract_end) = ($current_month + 1)
     AND YEAR(contract_end) = $current_year
@@ -644,44 +644,44 @@ $expiring_next_month = $conn->query("
                 <span class="date-badge"><?php echo date('F d, Y'); ?></span>
             </h1>
             <div class="quick-actions" style="margin-bottom: 0; padding: 0; background: transparent;">
-                <a href="add_contracts.php" class="btn btn-success">➕ New Contract</a>
-                <a href="view_contracts.php" class="btn btn-primary">📋 View Contracts</a>
-                <a href="calendar.php" class="btn" style="background: #9b59b6; color: white;">📅 Calendar</a>
-                <a href="view_zones.php" class="btn btn-info">🗺️ Zone Map</a>
+                <a href="r-add_contracts.php" class="btn btn-success">➕ New Contract</a>
+                <a href="r-view_contracts.php" class="btn btn-primary">📋 View Contracts</a>
+                <a href="r-calendar.php" class="btn" style="background: #9b59b6; color: white;">📅 Calendar</a>
+                <a href="r-view_zones.php" class="btn btn-info">🗺️ Zone Map</a>
             </div>
         </div>
 
         <!-- Summary Cards - Clickable -->
         <div class="summary-grid">
-            <a href="view_contracts.php" class="summary-card card-blue">
+            <a href="r-view_contracts.php" class="summary-card card-blue">
                 <div class="card-title">Total Contracts</div>
                 <div class="card-number"><?php echo $total_contracts; ?></div>
                 <div class="card-sub"><?php echo $active_contracts; ?> Active</div>
                 <div class="card-icon">📄</div>
             </a>
             
-            <a href="view_all_machines.php" class="summary-card card-green">
+            <a href="r-view_all_machines.php" class="summary-card card-green">
                 <div class="card-title">Total Machines</div>
                 <div class="card-number"><?php echo $total_machines; ?></div>
                 <div class="card-sub"><?php echo $active_machines; ?> Active</div>
                 <div class="card-icon">🖨️</div>
             </a>
             
-            <a href="view_clients.php" class="summary-card card-purple">
+            <a href="r-view_clients.php" class="summary-card card-purple">
                 <div class="card-title">Total Clients</div>
                 <div class="card-number"><?php echo $total_clients; ?></div>
                 <div class="card-sub"><?php echo $active_clients; ?> Active</div>
                 <div class="card-icon">🏢</div>
             </a>
             
-            <a href="expiring_contracts.php" class="summary-card card-yellow">
+            <a href="r-expiring_contracts.php" class="summary-card card-yellow">
                 <div class="card-title">Expiring Soon</div>
                 <div class="card-number"><?php echo $expiring_soon; ?></div>
                 <div class="card-sub">Next 60 days</div>
                 <div class="card-icon">⏰</div>
             </a>
             
-            <a href="expired_contracts.php" class="summary-card card-red">
+            <a href="r-expired_contracts.php" class="summary-card card-red">
                 <div class="card-title">Expired</div>
                 <div class="card-number"><?php echo $expired_contracts; ?></div>
                 <div class="card-sub">Contracts expired</div>
@@ -758,7 +758,7 @@ $expiring_next_month = $conn->query("
                     <?php 
                     $avg_length = $conn->query("
                         SELECT AVG(DATEDIFF(contract_end, contract_start)) as avg_days 
-                        FROM contracts 
+                        FROM rental_contracts 
                         WHERE contract_end IS NOT NULL AND contract_start IS NOT NULL
                     ")->fetch_assoc()['avg_days'];
                     echo $avg_length ? round($avg_length) . ' days' : '—';
@@ -824,7 +824,7 @@ $expiring_next_month = $conn->query("
             <div class="table-card">
                 <div class="table-header">
                     <span class="table-title">🏆 Top Clients by Machine Count</span>
-                    <a href="view_clients.php" class="view-all">View All →</a>
+                    <a href="r-view_clients.php" class="view-all">View All →</a>
                 </div>
                 <table>
                     <thead>
@@ -862,7 +862,7 @@ $expiring_next_month = $conn->query("
             <div class="table-card">
                 <div class="table-header">
                     <span class="table-title">📍 Machine Distribution by Zone</span>
-                    <a href="view_zones.php" class="view-all">View Map →</a>
+                    <a href="r-view_zones.php" class="view-all">View Map →</a>
                 </div>
                 <div style="max-height: 350px; overflow-y: auto;">
                     <table>
@@ -904,7 +904,7 @@ $expiring_next_month = $conn->query("
                     </table>
                 </div>
                 <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ecf0f1; text-align: center;">
-                    <a href="view_zones.php" style="color: #3498db; text-decoration: none; font-weight: 600;">
+                    <a href="r-view_zones.php" style="color: #3498db; text-decoration: none; font-weight: 600;">
                         View Detailed Zone Map →
                     </a>
                 </div>
@@ -928,7 +928,7 @@ $expiring_next_month = $conn->query("
             <div class="table-card">
                 <div class="table-header">
                     <span class="table-title">📄 Recent Contracts</span>
-                    <a href="view_contracts.php" class="view-all">View All →</a>
+                    <a href="r-view_contracts.php" class="view-all">View All →</a>
                 </div>
                 <table>
                     <thead>
@@ -985,7 +985,7 @@ $expiring_next_month = $conn->query("
             <div class="table-card">
                 <div class="table-header">
                     <span class="table-title">🖨️ Recent Machines</span>
-                    <a href="view_all_machines.php" class="view-all">View All →</a>
+                    <a href="r-view_all_machines.php" class="view-all">View All →</a>
                 </div>
                 <table>
                     <thead>
@@ -1028,7 +1028,7 @@ $expiring_next_month = $conn->query("
             <div class="table-card">
                 <div class="table-header">
                     <span class="table-title">📍 Zone Reading Dates</span>
-                    <a href="view_zones.php" class="view-all">View Map →</a>
+                    <a href="r-view_zones.php" class="view-all">View Map →</a>
                 </div>
                 <div style="max-height: 250px; overflow-y: auto;">
                     <table>
@@ -1044,8 +1044,8 @@ $expiring_next_month = $conn->query("
                             $zone_stats = $conn->query("
                                 SELECT z.zone_number, z.area_center, z.reading_date,
                                        COUNT(cm.id) as machine_count
-                                FROM zoning_zone z
-                                LEFT JOIN contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
+                                FROM rental_zoning_zone z
+                                LEFT JOIN rental_contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
                                 GROUP BY z.id
                                 ORDER BY z.zone_number
                                 LIMIT 6
@@ -1118,28 +1118,28 @@ $expiring_next_month = $conn->query("
                     <span class="table-title">🔗 Quick Links</span>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px;">
-                    <a href="add_contracts.php" style="background: #e3f2fd; color: #1976d2; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                    <a href="r-add_contracts.php" style="background: #e3f2fd; color: #1976d2; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         ➕ New Contract
                     </a>
-                    <a href="view_contracts.php" style="background: #e8f5e9; color: #2e7d32; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                    <a href="r-view_contracts.php" style="background: #e8f5e9; color: #2e7d32; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         📋 All Contracts
                     </a>
-                    <a href="calendar.php" style="background: #fff3cd; color: #856404; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                    <a href="r-calendar.php" style="background: #fff3cd; color: #856404; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         📅 Calendar
                     </a>
-                    <a href="expiring_contracts.php" style="background: #fff3cd; color: #856404; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                    <a href="r-expiring_contracts.php" style="background: #fff3cd; color: #856404; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         ⏰ Expiring Soon
                     </a>
-                    <a href="expired_contracts.php" style="background: #f8d7da; color: #721c24; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                    <a href="r-expired_contracts.php" style="background: #f8d7da; color: #721c24; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         ⚠️ Expired
                     </a>
-                    <a href="view_zones.php" style="background: #fff3e0; color: #e65100; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                    <a href="r-view_zones.php" style="background: #fff3e0; color: #e65100; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         🗺️ Zone Map
                     </a>
-                    <a href="view_all_machines.php" style="background: #f3e5f5; color: #6a1b9a; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                    <a href="r-view_all_machines.php" style="background: #f3e5f5; color: #6a1b9a; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         🖨️ All Machines
                     </a>
-                    <a href="view_clients.php" style="background: #ffebee; color: #c62828; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
+                    <a href="r-view_clients.php" style="background: #ffebee; color: #c62828; padding: 15px; text-align: center; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.3s;">
                         🏢 Clients
                     </a>
                 </div>

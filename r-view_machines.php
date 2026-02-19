@@ -12,8 +12,8 @@ if (!$contract_id) {
 // Get contract info
 $contract_query = $conn->query("
     SELECT c.*, cl.company_name, cl.classification 
-    FROM contracts c
-    JOIN clients cl ON c.client_id = cl.id
+    FROM rental_contracts c
+    JOIN rental_clients cl ON c.client_id = cl.id
     WHERE c.id = $contract_id
 ");
 $contract = $contract_query->fetch_assoc();
@@ -23,7 +23,7 @@ if (!$contract) {
 }
 
 // Build machines query
-$query = "SELECT * FROM contract_machines WHERE contract_id = $contract_id";
+$query = "SELECT * FROM rental_contract_machines WHERE contract_id = $contract_id";
 $params = [];
 $types = "";
 
@@ -246,9 +246,9 @@ $machines = $stmt->get_result();
                     <h2><?php echo htmlspecialchars($contract['company_name']); ?> (<?php echo $contract['classification']; ?>)</h2>
                 </div>
                 <div>
-                    <a href="add_contract_machines.php?contract_id=<?php echo $contract_id; ?>&type=<?php echo $contract['type_of_contract']; ?>&client_id=<?php echo $contract['client_id']; ?>" class="btn btn-success">+ Add Machine</a>
-                    <a href="edit_contract.php?id=<?php echo $contract_id; ?>" class="btn">Edit Contract</a>
-                    <a href="view_contracts.php" class="btn" style="background: #95a5a6;">Back to Contracts</a>
+                    <a href="r-add_contract_machines.php?contract_id=<?php echo $contract_id; ?>&type=<?php echo $contract['type_of_contract']; ?>&client_id=<?php echo $contract['client_id']; ?>" class="btn btn-success">+ Add Machine</a>
+                    <a href="r-edit_contract.php?id=<?php echo $contract_id; ?>" class="btn">Edit Contract</a>
+                    <a href="r-view_contracts.php" class="btn" style="background: #95a5a6;">Back to Contracts</a>
                 </div>
             </div>
         </div>
@@ -285,7 +285,7 @@ $machines = $stmt->get_result();
                 </div>
                 <div>
                     <button type="submit" class="btn">Filter</button>
-                    <a href="view_machines.php?contract_id=<?php echo $contract_id; ?>" class="btn" style="background: #95a5a6;">Clear</a>
+                    <a href="r-view_machines.php?contract_id=<?php echo $contract_id; ?>" class="btn" style="background: #95a5a6;">Clear</a>
                 </div>
             </form>
         </div>
@@ -395,7 +395,7 @@ $machines = $stmt->get_result();
                                                     📑 View Receipts (<?php echo $drpos_count; ?>)
                                                 </button>
                                             <?php endif; ?>
-                                            <a href="upload_drpos.php?machine_id=<?php echo $machine['id']; ?>" 
+                                            <a href="r-upload_drpos.php?machine_id=<?php echo $machine['id']; ?>" 
                                             style="background: #27ae60; color: white; text-decoration: none; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: 600;">
                                                 ➕ Add
                                             </a>
@@ -408,7 +408,7 @@ $machines = $stmt->get_result();
                                     <span class="info-value">
                                         <div style="display: flex; align-items: center; gap: 10px;">
                                             <span style="color: #7f8c8d; font-size: 12px;">No receipts</span>
-                                            <a href="upload_drpos.php?machine_id=<?php echo $machine['id']; ?>" 
+                                            <a href="r-upload_drpos.php?machine_id=<?php echo $machine['id']; ?>" 
                                             style="background: #27ae60; color: white; text-decoration: none; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: 600;">
                                                 ➕ Add Receipt
                                             </a>
@@ -418,7 +418,7 @@ $machines = $stmt->get_result();
                             <?php endif; ?>
                             
                             <div class="action-buttons">
-                                <a href="edit_machine.php?id=<?php echo $machine['id']; ?>" class="action-btn" style="background: #f39c12;">Edit</a>
+                                <a href="r-edit_machine.php?id=<?php echo $machine['id']; ?>" class="action-btn" style="background: #f39c12;">Edit</a>
                                 <?php if ($machine['status'] == 'ACTIVE'): ?>
                                     <a href="#" onclick="updateMachineStatus(<?php echo $machine['id']; ?>, 'INACTIVE')" class="action-btn" style="background: #95a5a6;">Deactivate</a>
                                 <?php else: ?>
@@ -432,7 +432,7 @@ $machines = $stmt->get_result();
                 <div style="grid-column: 1/-1; text-align: center; padding: 60px; background: white; border-radius: 10px;">
                     <h3 style="color: #7f8c8d; margin-bottom: 10px;">No Machines Found</h3>
                     <p>This contract doesn't have any machines yet.</p>
-                    <a href="add_contract_machines.php?contract_id=<?php echo $contract_id; ?>&type=<?php echo $contract['type_of_contract']; ?>&client_id=<?php echo $contract['client_id']; ?>" class="btn btn-success" style="margin-top: 20px;">
+                    <a href="r-add_contract_machines.php?contract_id=<?php echo $contract_id; ?>&type=<?php echo $contract['type_of_contract']; ?>&client_id=<?php echo $contract['client_id']; ?>" class="btn btn-success" style="margin-top: 20px;">
                         + Add First Machine
                     </a>
                 </div>
@@ -443,7 +443,7 @@ $machines = $stmt->get_result();
     <script>
     function updateMachineStatus(machineId, newStatus) {
         if (confirm(`Are you sure you want to ${newStatus === 'ACTIVE' ? 'activate' : 'deactivate'} this machine?`)) {
-            fetch('update_machine_status.php', {
+            fetch('r-update_machine_status.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id: machineId, status: newStatus })

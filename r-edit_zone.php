@@ -9,7 +9,7 @@ if (!$zone_id) {
 }
 
 // Get zone data
-$zone_query = $conn->query("SELECT * FROM zoning_zone WHERE id = $zone_id");
+$zone_query = $conn->query("SELECT * FROM rental_zoning_zone WHERE id = $zone_id");
 $zone = $zone_query->fetch_assoc();
 
 if (!$zone) {
@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $latitude = !empty($_POST['latitude']) ? floatval($_POST['latitude']) : 'NULL';
     $longitude = !empty($_POST['longitude']) ? floatval($_POST['longitude']) : 'NULL';
     
-    $update_sql = "UPDATE zoning_zone SET 
+    $update_sql = "UPDATE rental_zoning_zone SET 
                     zone_number = $zone_number,
                     area_center = '$area_center',
                     reading_date = $reading_date,
@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if ($conn->query($update_sql)) {
         $success = "Zone updated successfully!";
         // Refresh data
-        $zone_query = $conn->query("SELECT * FROM zoning_zone WHERE id = $zone_id");
+        $zone_query = $conn->query("SELECT * FROM rental_zoning_zone WHERE id = $zone_id");
         $zone = $zone_query->fetch_assoc();
     } else {
         $error = "Error updating zone: " . $conn->error;
@@ -110,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             </div>
             
             <button type="submit" class="btn">Update Zone</button>
-            <a href="view_zones.php" style="margin-left: 10px; color: #7f8c8d;">Cancel</a>
+            <a href="r-view_zones.php" style="margin-left: 10px; color: #7f8c8d;">Cancel</a>
         </form>
     </div>
 </body>

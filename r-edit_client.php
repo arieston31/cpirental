@@ -9,12 +9,12 @@ $duplicate_warning = '';
 $client_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 if ($client_id <= 0) {
-    header("Location: view_clients.php");
+    header("Location: r-view_clients.php");
     exit();
 }
 
 // Fetch existing client data
-$sql = "SELECT * FROM clients WHERE id = ?";
+$sql = "SELECT * FROM rental_clients WHERE id = ?";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param("i", $client_id);
 $stmt->execute();
@@ -22,7 +22,7 @@ $result = $stmt->get_result();
 $client = $result->fetch_assoc();
 
 if (!$client) {
-    header("Location: view_clients.php");
+    header("Location: r-view_clients.php");
     exit();
 }
 
@@ -33,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $company_name = trim($_POST['company_name'] ?? '');
         if (strlen($company_name) >= 5) {
             // Check for duplicates excluding current client
-            $check_sql = "SELECT * FROM clients WHERE company_name LIKE ? AND id != ? LIMIT 1";
+            $check_sql = "SELECT * FROM rental_clients WHERE company_name LIKE ? AND id != ? LIMIT 1";
             $check_stmt = $conn->prepare($check_sql);
             $search_term = "%" . $company_name . "%";
             $check_stmt->bind_param("si", $search_term, $client_id);
@@ -98,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Final duplicate check before updating
     if (strlen($company_name) >= 5 && empty($errors)) {
-        $check_sql = "SELECT * FROM clients WHERE company_name LIKE ? AND id != ? LIMIT 1";
+        $check_sql = "SELECT * FROM rental_clients WHERE company_name LIKE ? AND id != ? LIMIT 1";
         $check_stmt = $conn->prepare($check_sql);
         $search_term = "%" . $company_name . "%";
         $check_stmt->bind_param("si", $search_term, $client_id);
@@ -115,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // If no errors, update database
     if (empty($errors)) {
         // Prepare SQL statement
-        $sql = "UPDATE clients SET 
+        $sql = "UPDATE rental_clients SET 
                     classification = ?, 
                     company_name = ?, 
                     main_signatory = ?, 
@@ -544,8 +544,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             </div>
             <div class="header-buttons">
-                <a href="dashboard.php" class="btn btn-dashboard">Dashboard</a>
-                <a href="view_clients.php" class="btn btn-view">View All Clients</a>
+                <a href="r-dashboard.php" class="btn btn-dashboard">Dashboard</a>
+                <a href="r-view_clients.php" class="btn btn-view">View All Clients</a>
             </div>
         </div>
         
@@ -637,7 +637,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             
             <div class="form-actions">
-                <a href="view_clients.php" class="btn btn-cancel">Cancel</a>
+                <a href="r-view_clients.php" class="btn btn-cancel">Cancel</a>
                 <button type="submit" class="btn btn-update">Update Client</button>
             </div>
         </form>

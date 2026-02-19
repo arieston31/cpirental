@@ -78,10 +78,10 @@ $query = "
         c.collection_processing_period,
         c.collection_date as contract_collection_date,
         cm.reading_date_remarks
-    FROM contract_machines cm
-    JOIN contracts c ON cm.contract_id = c.id
-    JOIN clients cl ON cm.client_id = cl.id
-    JOIN zoning_zone z ON cm.zone_id = z.id
+    FROM rental_contract_machines cm
+    JOIN rental_contracts c ON cm.contract_id = c.id
+    JOIN rental_clients cl ON cm.client_id = cl.id
+    JOIN rental_zoning_zone z ON cm.zone_id = z.id
     WHERE cm.status = 'ACTIVE'
     AND c.status = 'ACTIVE'
     AND cl.status = 'ACTIVE'
@@ -621,15 +621,15 @@ foreach ($servicesToShow as $service) {
         <div class="filters">
             <h3 style="margin: 0; color: #333;">Filter Services:</h3>
             <div class="filter-buttons">
-                <a href="day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=all" 
+                <a href="r-day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=all" 
                    class="filter-btn <?php echo $type == 'all' ? 'active' : ''; ?>">
                    📋 All Services (<?php echo $totalServices; ?>)
                 </a>
-                <a href="day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=reading" 
+                <a href="r-day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=reading" 
                    class="filter-btn <?php echo $type == 'reading' ? 'active' : ''; ?>">
                    📅 Readings (<?php echo $totalReadings; ?>)
                 </a>
-                <a href="day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=collection" 
+                <a href="r-day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=collection" 
                    class="filter-btn <?php echo $type == 'collection' ? 'active' : ''; ?>">
                    📦 Collections (<?php echo $totalCollections; ?>)
                 </a>
@@ -651,7 +651,7 @@ foreach ($servicesToShow as $service) {
                 <div class="no-services">
                     <h3>No services scheduled for this day</h3>
                     <p>There are no <?php echo $type == 'all' ? '' : $type; ?> services scheduled for <?php echo $monthName . ' ' . $ordinalDay . ', ' . $year; ?>.</p>
-                    <p><a href="calendar.php?month=<?php echo $month; ?>&year=<?php echo $year; ?>" class="btn">← Back to Calendar</a></p>
+                    <p><a href="r-calendar.php?month=<?php echo $month; ?>&year=<?php echo $year; ?>" class="btn">← Back to Calendar</a></p>
                 </div>
             <?php else: ?>
                 <table class="service-table">
@@ -799,12 +799,12 @@ foreach ($servicesToShow as $service) {
                                 <?php endif; ?>
                             </td>
                             <td>
-                                <a href="edit_machine.php?id=<?php echo $service['id']; ?>" 
+                                <a href="r-edit_machine.php?id=<?php echo $service['id']; ?>" 
                                    class="filter-btn" 
                                    style="display: block; margin-bottom: 5px; text-align: center; background: #f39c12; color: white; border-color: #e67e22;">
                                    ✏️ Edit
                                 </a>
-                                <a href="view_machines.php?contract_id=<?php echo $service['contract_id']; ?>" 
+                                <a href="r-view_machines.php?contract_id=<?php echo $service['contract_id']; ?>" 
                                    class="filter-btn" 
                                    style="display: block; margin-bottom: 5px; text-align: center; background: #3498db; color: white; border-color: #2980b9;">
                                    👁️ View Contract
@@ -830,10 +830,10 @@ foreach ($servicesToShow as $service) {
         </div>
         
         <div class="actions">
-            <a href="calendar.php?month=<?php echo $month; ?>&year=<?php echo $year; ?>" class="btn">← Back to Calendar</a>
-            <a href="dashboard.php" class="btn btn-secondary">📊 Dashboard</a>
-            <a href="view_contracts.php" class="btn btn-info">📋 Contracts</a>
-            <a href="view_zones.php" class="btn btn-warning">🗺️ Zone Map</a>
+            <a href="r-calendar.php?month=<?php echo $month; ?>&year=<?php echo $year; ?>" class="btn">← Back to Calendar</a>
+            <a href="r-dashboard.php" class="btn btn-secondary">📊 Dashboard</a>
+            <a href="r-view_contracts.php" class="btn btn-info">📋 Contracts</a>
+            <a href="r-view_zones.php" class="btn btn-warning">🗺️ Zone Map</a>
         </div>
     </div>
     

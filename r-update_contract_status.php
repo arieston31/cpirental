@@ -12,7 +12,7 @@ if (!$id || !$status) {
     exit;
 }
 
-$sql = "UPDATE contracts SET status = '$status', updated_at = NOW() WHERE id = $id";
+$sql = "UPDATE rental_contracts SET status = '$status', updated_at = NOW() WHERE id = $id";
 
 if ($conn->query($sql)) {
     echo json_encode(['success' => true]);

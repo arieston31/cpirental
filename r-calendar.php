@@ -89,10 +89,10 @@ $machinesQuery = $conn->query("
         z.area_center,
         z.reading_date as zone_reading_date,
         c.collection_processing_period
-    FROM contract_machines cm
-    JOIN contracts c ON cm.contract_id = c.id
-    JOIN clients cl ON cm.client_id = cl.id
-    JOIN zoning_zone z ON cm.zone_id = z.id
+    FROM rental_contract_machines cm
+    JOIN rental_contracts c ON cm.contract_id = c.id
+    JOIN rental_clients cl ON cm.client_id = cl.id
+    JOIN rental_zoning_zones z ON cm.zone_id = z.id
     WHERE cm.status = 'ACTIVE'
     AND c.status = 'ACTIVE'
     AND cl.status = 'ACTIVE'
@@ -210,7 +210,7 @@ $alignment_stats = $conn->query("
         COUNT(*) as total,
         SUM(CASE WHEN reading_date_remarks = 'aligned reading date' THEN 1 ELSE 0 END) as aligned,
         SUM(CASE WHEN reading_date_remarks = 'mis-aligned reading date' THEN 1 ELSE 0 END) as misaligned
-    FROM contract_machines
+    FROM rental_contract_machines
     WHERE status = 'ACTIVE'
 ")->fetch_assoc();
 ?>
@@ -662,9 +662,9 @@ $alignment_stats = $conn->query("
                 <p>Reading and Collection Schedule for <?php echo $monthName . ' ' . $year; ?></p>
             </div>
             <div class="year-nav">
-                <a href="calendar.php?month=<?php echo $prevMonth; ?>&year=<?php echo $prevYear; ?>">← <?php echo date('M', mktime(0, 0, 0, $prevMonth, 1, $prevYear)); ?></a>
-                <a href="calendar.php">Current Month</a>
-                <a href="calendar.php?month=<?php echo $nextMonth; ?>&year=<?php echo $nextYear; ?>"><?php echo date('M', mktime(0, 0, 0, $nextMonth, 1, $nextYear)); ?> →</a>
+                <a href="r-calendar.php?month=<?php echo $prevMonth; ?>&year=<?php echo $prevYear; ?>">← <?php echo date('M', mktime(0, 0, 0, $prevMonth, 1, $prevYear)); ?></a>
+                <a href="r-calendar.php">Current Month</a>
+                <a href="r-calendar.php?month=<?php echo $nextMonth; ?>&year=<?php echo $nextYear; ?>"><?php echo date('M', mktime(0, 0, 0, $nextMonth, 1, $nextYear)); ?> →</a>
             </div>
         </div>
         
@@ -709,9 +709,9 @@ $alignment_stats = $conn->query("
             <div class="calendar-header">
                 <div class="month-year"><?php echo $monthName . ' ' . $year; ?></div>
                 <div class="month-navigation">
-                    <a href="calendar.php?month=<?php echo $prevMonth; ?>&year=<?php echo $prevYear; ?>" class="nav-btn">← <?php echo date('M', mktime(0, 0, 0, $prevMonth, 1, $prevYear)); ?></a>
-                    <a href="calendar.php" class="nav-btn">Current Month</a>
-                    <a href="calendar.php?month=<?php echo $nextMonth; ?>&year=<?php echo $nextYear; ?>" class="nav-btn"><?php echo date('M', mktime(0, 0, 0, $nextMonth, 1, $nextYear)); ?> →</a>
+                    <a href="r-calendar.php?month=<?php echo $prevMonth; ?>&year=<?php echo $prevYear; ?>" class="nav-btn">← <?php echo date('M', mktime(0, 0, 0, $prevMonth, 1, $prevYear)); ?></a>
+                    <a href="r-calendar.php" class="nav-btn">Current Month</a>
+                    <a href="r-calendar.php?month=<?php echo $nextMonth; ?>&year=<?php echo $nextYear; ?>" class="nav-btn"><?php echo date('M', mktime(0, 0, 0, $nextMonth, 1, $nextYear)); ?> →</a>
                 </div>
             </div>
             
@@ -787,7 +787,7 @@ $alignment_stats = $conn->query("
                         <div class="day-number">
                             <span>
                                 <?php if ($hasServices): ?>
-                                    <a href="day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>" 
+                                    <a href="r-day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>" 
                                        style="color: inherit; text-decoration: none;">
                                         <?php echo $day; ?>
                                     </a>
@@ -805,7 +805,7 @@ $alignment_stats = $conn->query("
                             <div class="event-count <?php echo $hasAdjustedServices && array_filter($adjustedNotes, function($n) { return $n['type'] == 'reading'; }) ? 'adjusted-count' : 'reading-count'; ?>">
                                 <span>
                                     <?php if ($hasServices): ?>
-                                        <a href="day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=reading" 
+                                        <a href="r-day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=reading" 
                                            style="color: inherit; text-decoration: none;">
                                             📅 Readings 
                                         </a>
@@ -818,7 +818,7 @@ $alignment_stats = $conn->query("
                                 </span>
                                 <span class="count-number">
                                     <?php if ($hasServices): ?>
-                                        <a href="day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=reading" 
+                                        <a href="r-day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=reading" 
                                            style="color: inherit; text-decoration: none;">
                                             <?php echo $readingCount; ?>
                                         </a>
@@ -833,7 +833,7 @@ $alignment_stats = $conn->query("
                             <div class="event-count <?php echo $hasAdjustedServices && array_filter($adjustedNotes, function($n) { return $n['type'] == 'collection'; }) ? 'adjusted-count' : 'collection-count'; ?>">
                                 <span>
                                     <?php if ($hasServices): ?>
-                                        <a href="day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=collection" 
+                                        <a href="r-day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=collection" 
                                            style="color: inherit; text-decoration: none;">
                                             📦 Collections 
                                         </a>
@@ -846,7 +846,7 @@ $alignment_stats = $conn->query("
                                 </span>
                                 <span class="count-number">
                                     <?php if ($hasServices): ?>
-                                        <a href="day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=collection" 
+                                        <a href="r-day_details.php?year=<?php echo $year; ?>&month=<?php echo $month; ?>&day=<?php echo $day; ?>&type=collection" 
                                            style="color: inherit; text-decoration: none;">
                                             <?php echo $collectionCount; ?>
                                         </a>
@@ -918,9 +918,9 @@ $alignment_stats = $conn->query("
         <?php endif; ?>
         
         <div class="actions">
-            <a href="dashboard.php" class="btn">← Back to Dashboard</a>
-            <a href="view_contracts.php" class="btn btn-secondary">📋 View Contracts</a>
-            <a href="view_zones.php" class="btn btn-info">🗺️ Zone Map</a>
+            <a href="r-dashboard.php" class="btn">← Back to Dashboard</a>
+            <a href="r-view_contracts.php" class="btn btn-secondary">📋 View Contracts</a>
+            <a href="r-view_zones.php" class="btn btn-info">🗺️ Zone Map</a>
         </div>
     </div>
     

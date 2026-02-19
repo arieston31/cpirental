@@ -16,15 +16,15 @@ $conn->begin_transaction();
 
 try {
     // Update machine status
-    $sql = "UPDATE contract_machines SET status = '$status', updated_at = NOW() WHERE id = $id";
+    $sql = "UPDATE rental_contract_machines SET status = '$status', updated_at = NOW() WHERE id = $id";
     $conn->query($sql);
     
     // Get contract_id and client classification
     $machine_query = $conn->query("
         SELECT cm.contract_id, cl.classification 
-        FROM contract_machines cm
-        JOIN contracts c ON cm.contract_id = c.id
-        JOIN clients cl ON c.client_id = cl.id
+        FROM rental_contract_machines cm
+        JOIN rental_contracts c ON cm.contract_id = c.id
+        JOIN rental_clients cl ON c.client_id = cl.id
         WHERE cm.id = $id
     ");
     $machine = $machine_query->fetch_assoc();
@@ -34,7 +34,7 @@ try {
         // Get highest reading date from active machines
         $highest_query = $conn->query("
             SELECT MAX(reading_date) as max_date 
-            FROM contract_machines 
+            FROM rental_contract_machines 
             WHERE contract_id = {$machine['contract_id']} AND status = 'ACTIVE'
         ");
         $highest = $highest_query->fetch_assoc();
@@ -43,7 +43,7 @@ try {
         // Get contract processing period
         $contract_query = $conn->query("
             SELECT collection_processing_period 
-            FROM contracts 
+            FROM rental_contracts 
             WHERE id = {$machine['contract_id']}
         ");
         $contract = $contract_query->fetch_assoc();
@@ -57,7 +57,7 @@ try {
         
         // Update contract
         $conn->query("
-            UPDATE contracts 
+            UPDATE rental_contracts 
             SET collection_date = $collection_date 
             WHERE id = {$machine['contract_id']}
         ");

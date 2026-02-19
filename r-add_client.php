@@ -1,18 +1,16 @@
 <?php
 require_once 'config.php'; // Database connection
-
 $message = '';
 $message_type = ''; // 'success' or 'error'
 $duplicate_warning = '';
 $existing_client = null;
-
 // Process form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Check if this is an AJAX duplicate check request
     if (isset($_POST['check_duplicate']) && $_POST['check_duplicate'] === 'true') {
         $company_name = trim($_POST['company_name'] ?? '');
         if (strlen($company_name) >= 5) {
-            $check_sql = "SELECT * FROM clients WHERE company_name LIKE ? LIMIT 1";
+            $check_sql = "SELECT * FROM rental_clients WHERE company_name LIKE ? LIMIT 1";
             $check_stmt = $conn->prepare($check_sql);
             $search_term = "%" . $company_name . "%";
             $check_stmt->bind_param("s", $search_term);
@@ -71,7 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Final duplicate check before inserting
     if (strlen($company_name) >= 5) {
-        $check_sql = "SELECT * FROM clients WHERE company_name LIKE ? LIMIT 1";
+        $check_sql = "SELECT * FROM rental_clients WHERE company_name LIKE ? LIMIT 1";
         $check_stmt = $conn->prepare($check_sql);
         $search_term = "%" . $company_name . "%";
         $check_stmt->bind_param("s", $search_term);
@@ -88,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // If no errors, insert into database
     if (empty($errors)) {
         // Prepare SQL statement with hidden fields
-        $sql = "INSERT INTO clients (
+        $sql = "INSERT INTO rental_clients (
                     classification, company_name, main_signatory, signatory_position, 
                     main_number, main_address, tin_number, email, 
                     status, created_at, created_by
@@ -408,7 +406,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
     <div class="header">
         <h1>Add New Client</h1>
-        <a href="dashboard.php" class="dashboard-btn">Dashboard</a>
+        <a href="r-dashboard.php" class="dashboard-btn">Dashboard</a>
     </div>
     
     <div class="container">

@@ -11,8 +11,8 @@ $query = "SELECT
             cl.company_name, 
             cl.classification,
             DATEDIFF('$current_date', c.contract_end) as days_expired
-          FROM contracts c
-          JOIN clients cl ON c.client_id = cl.id
+          FROM rental_contracts c
+          JOIN rental_clients cl ON c.client_id = cl.id
           WHERE c.contract_end IS NOT NULL 
           AND c.contract_end < '$current_date'
           AND c.status = 'ACTIVE'";
@@ -47,7 +47,7 @@ $contracts = $stmt->get_result();
 $total_expired = $contracts->num_rows;
 $expired_this_month = $conn->query("
     SELECT COUNT(*) as count 
-    FROM contracts 
+    FROM rental_contracts 
     WHERE contract_end IS NOT NULL 
     AND contract_end < '$current_date'
     AND MONTH(contract_end) = MONTH('$current_date')
@@ -57,7 +57,7 @@ $expired_this_month = $conn->query("
 
 $expired_this_year = $conn->query("
     SELECT COUNT(*) as count 
-    FROM contracts 
+    FROM rental_contracts 
     WHERE contract_end IS NOT NULL 
     AND contract_end < '$current_date'
     AND YEAR(contract_end) = YEAR('$current_date')
@@ -243,8 +243,8 @@ $expired_this_year = $conn->query("
                 </span>
             </h1>
             <div>
-                <a href="dashboard.php" class="back-btn">← Back to Dashboard</a>
-                <a href="expiring_contracts.php" class="btn btn-primary">View Expiring</a>
+                <a href="r-dashboard.php" class="back-btn">← Back to Dashboard</a>
+                <a href="r-expiring_contracts.php" class="btn btn-primary">View Expiring</a>
             </div>
         </div>
 
@@ -284,7 +284,7 @@ $expired_this_year = $conn->query("
                 </div>
                 <div class="filter-group" style="display: flex; gap: 10px;">
                     <button type="submit" class="btn btn-primary">Apply Filters</button>
-                    <a href="expired_contracts.php" class="btn" style="background: #95a5a6; color: white;">Clear</a>
+                    <a href="r-expired_contracts.php" class="btn" style="background: #95a5a6; color: white;">Clear</a>
                 </div>
             </form>
         </div>
@@ -309,7 +309,7 @@ $expired_this_year = $conn->query("
                         <?php while($contract = $contracts->fetch_assoc()): ?>
                             <tr>
                                 <td>
-                                    <a href="edit_contract.php?id=<?php echo $contract['id']; ?>" class="contract-number">
+                                    <a href="r-edit_contract.php?id=<?php echo $contract['id']; ?>" class="contract-number">
                                         <?php echo htmlspecialchars($contract['contract_number']); ?>
                                     </a>
                                 </td>
@@ -330,7 +330,7 @@ $expired_this_year = $conn->query("
                                     <span class="badge-expired">Expired</span>
                                 </td>
                                 <td>
-                                    <a href="edit_contract.php?id=<?php echo $contract['id']; ?>" class="renew-btn">
+                                    <a href="r-edit_contract.php?id=<?php echo $contract['id']; ?>" class="renew-btn">
                                         Renew Contract
                                     </a>
                                 </td>

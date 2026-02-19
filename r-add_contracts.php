@@ -9,7 +9,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_contract'])) {
     try {
         // Get client classification
         $client_id = intval($_POST['client_id']);
-        $client_query = $conn->query("SELECT classification FROM clients WHERE id = $client_id");
+        $client_query = $conn->query("SELECT classification FROM rental_clients WHERE id = $client_id");
         $client_data = $client_query->fetch_assoc();
         $classification = $client_data['classification'];
         
@@ -22,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_contract'])) {
         // --- FIXED: Get the sequence number for this classification AND year ---
         $seq_query = $conn->query("
             SELECT COUNT(*) as count 
-            FROM contracts 
+            FROM rental_contracts 
             WHERE contract_number LIKE 'RCN-{$year}-{$prefix}%'
             AND YEAR(datecreated) = {$year}
         ");
@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_contract'])) {
         $sequence = str_pad($seq_data['count'] + 1, 3, '0', STR_PAD_LEFT);
         
         // --- FIXED: Get the overall contract count for the last 6 digits ---
-        $total_query = $conn->query("SELECT COUNT(*) as total FROM contracts");
+        $total_query = $conn->query("SELECT COUNT(*) as total FROM rental_contracts");
         $total_data = $total_query->fetch_assoc();
         $overall_sequence = str_pad($total_data['total'] + 1, 6, '0', STR_PAD_LEFT);
         
@@ -59,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_contract'])) {
         $minimum_monthly_charge = !empty($_POST['minimum_monthly_charge']) ? floatval($_POST['minimum_monthly_charge']) : 'NULL';
 
         // In the INSERT statement, add minimum_monthly_charge field
-        $contract_sql = "INSERT INTO contracts (
+        $contract_sql = "INSERT INTO rental_contracts (
             contract_number, contract_start, contract_end, client_id, type_of_contract, has_colored_machines,
             mono_rate, color_rate, excess_monorate, excess_colorrate,
             mincopies_mono, mincopies_color, spoilage, minimum_monthly_charge, collection_processing_period,
@@ -104,14 +104,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_contract'])) {
             }
             
             if (!empty($uploaded_files)) {
-                $conn->query("UPDATE contracts SET contract_file = '" . implode(',', $uploaded_files) . "' WHERE id = $contract_id");
+                $conn->query("UPDATE rental_contracts SET contract_file = '" . implode(',', $uploaded_files) . "' WHERE id = $contract_id");
             }
         }
         
         $conn->commit();
         
         // Redirect to add machine details
-        header("Location: add_contract_machines.php?contract_id=$contract_id&type=" . urlencode($_POST['type_of_contract']) . "&client_id=$client_id");
+        header("Location: r-add_contract_machines.php?contract_id=$contract_id&type=" . urlencode($_POST['type_of_contract']) . "&client_id=$client_id");
         exit();
         
     } catch (Exception $e) {
@@ -127,7 +127,7 @@ if (isset($_GET['search'])) {
     $search = $conn->real_escape_string($_GET['search']);
     $result = $conn->query("
         SELECT id, company_name, main_signatory, classification 
-        FROM clients 
+        FROM rental_clients  
         WHERE company_name LIKE '%$search%' OR main_signatory LIKE '%$search%'
         LIMIT 10
     ");
@@ -146,14 +146,14 @@ function getNextContractNumber($conn, $classification, $year = null) {
     
     $seq_query = $conn->query("
         SELECT COUNT(*) as count 
-        FROM contracts 
+        FROM rental_contracts 
         WHERE contract_number LIKE 'RCN-{$year}-{$prefix}%'
         AND YEAR(datecreated) = {$year}
     ");
     $seq_data = $seq_query->fetch_assoc();
     $sequence = str_pad($seq_data['count'] + 1, 3, '0', STR_PAD_LEFT);
     
-    $total_query = $conn->query("SELECT COUNT(*) as total FROM contracts");
+    $total_query = $conn->query("SELECT COUNT(*) as total FROM rental_contracts");
     $total_data = $total_query->fetch_assoc();
     $overall_sequence = str_pad($total_data['total'] + 1, 6, '0', STR_PAD_LEFT);
     
@@ -417,7 +417,7 @@ if (isset($_GET['get_contract_number']) && isset($_GET['classification'])) {
             
             if (searchTerm.length >= 2) {
                 searchTimeout = setTimeout(() => {
-                    fetch(`add_contracts.php?search=${encodeURIComponent(searchTerm)}`)
+                    fetch(`r-add_contracts.php?search=${encodeURIComponent(searchTerm)}`)
                         .then(response => response.json())
                         .then(data => {
                             searchResults.innerHTML = '';
@@ -468,7 +468,7 @@ if (isset($_GET['get_contract_number']) && isset($_GET['classification'])) {
             const year = new Date().getFullYear();
             const prefix = client.classification === 'GOVERNMENT' ? 'G' : 'P';
             
-            fetch(`add_contracts.php?get_contract_number=1&classification=${client.classification}&year=${year}`)
+            fetch(`r-add_contracts.php?get_contract_number=1&classification=${client.classification}&year=${year}`)
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('contract_number').value = data.contract_number;

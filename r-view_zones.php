@@ -13,10 +13,10 @@ $query = "SELECT
             COUNT(DISTINCT CASE WHEN cm.reading_date_remarks = 'aligned reading date' THEN cm.id END) as aligned_count,
             COUNT(DISTINCT CASE WHEN cm.reading_date_remarks = 'mis-aligned reading date' THEN cm.id END) as misaligned_count,
             COUNT(DISTINCT cl.id) as client_count
-          FROM zoning_zone z
-          LEFT JOIN contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
-          LEFT JOIN contracts c ON cm.contract_id = c.id AND c.status = 'ACTIVE'
-          LEFT JOIN clients cl ON c.client_id = cl.id AND cl.status = 'ACTIVE'
+          FROM rental_zoning_zone z
+          LEFT JOIN rental_contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
+          LEFT JOIN rental_contracts c ON cm.contract_id = c.id AND c.status = 'ACTIVE'
+          LEFT JOIN rental_clients cl ON c.client_id = cl.id AND cl.status = 'ACTIVE'
           WHERE 1=1";
 
 $params = [];
@@ -46,40 +46,40 @@ $stmt->execute();
 $zones = $stmt->get_result();
 
 // Get overall statistics
-$total_zones = $conn->query("SELECT COUNT(*) as count FROM zoning_zone")->fetch_assoc()['count'];
+$total_zones = $conn->query("SELECT COUNT(*) as count FROM rental_zoning_zone")->fetch_assoc()['count'];
 $total_machines_in_zones = $conn->query("
     SELECT COUNT(*) as count 
-    FROM contract_machines 
+    FROM rental_contract_machines 
     WHERE zone_id IS NOT NULL AND status = 'ACTIVE'
 ")->fetch_assoc()['count'];
 $total_aligned = $conn->query("
     SELECT COUNT(*) as count 
-    FROM contract_machines 
+    FROM rental_contract_machines 
     WHERE reading_date_remarks = 'aligned reading date' AND status = 'ACTIVE'
 ")->fetch_assoc()['count'];
 $total_misaligned = $conn->query("
     SELECT COUNT(*) as count 
-    FROM contract_machines 
+    FROM rental_contract_machines 
     WHERE reading_date_remarks = 'mis-aligned reading date' AND status = 'ACTIVE'
 ")->fetch_assoc()['count'];
 
 // Get zone with highest machine count
 $top_zone = $conn->query("
     SELECT z.zone_number, z.area_center, COUNT(cm.id) as machine_count
-    FROM zoning_zone z
-    LEFT JOIN contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
+    FROM rental_zoning_zone z
+    LEFT JOIN rental_contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
     GROUP BY z.id
     ORDER BY machine_count DESC
     LIMIT 1
 ")->fetch_assoc();
 
 // Get all zones for map data (JSON)
-$map_zones = $conn->query("SELECT * FROM zoning_zone WHERE latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY zone_number");
+$map_zones = $conn->query("SELECT * FROM rental_zoning_zone WHERE latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY zone_number");
 $map_data = [];
 while($zone = $map_zones->fetch_assoc()) {
     $zone['machine_count'] = $conn->query("
         SELECT COUNT(*) as count 
-        FROM contract_machines 
+        FROM rental_contract_machines 
         WHERE zone_id = {$zone['id']} AND status = 'ACTIVE'
     ")->fetch_assoc()['count'];
     $map_data[] = $zone;
@@ -554,8 +554,8 @@ $map_data_json = json_encode($map_data);
                 </span>
             </h1>
             <div>
-                <a href="dashboard.php" class="btn btn-primary">📊 Dashboard</a>
-                <a href="view_contracts.php" class="btn btn-success">📋 Contracts</a>
+                <a href="r-dashboard.php" class="btn btn-primary">📊 Dashboard</a>
+                <a href="r-view_contracts.php" class="btn btn-success">📋 Contracts</a>
             </div>
         </div>
 
@@ -651,7 +651,7 @@ $map_data_json = json_encode($map_data);
                 </div>
                 <div class="filter-group" style="display: flex; gap: 10px; align-items: center;">
                     <button type="submit" class="btn btn-primary">Apply Filters</button>
-                    <a href="view_zones.php" class="btn" style="background: #95a5a6; color: white;">Clear</a>
+                    <a href="r-view_zones.php" class="btn" style="background: #95a5a6; color: white;">Clear</a>
                 </div>
             </form>
         </div>
@@ -767,11 +767,11 @@ $map_data_json = json_encode($map_data);
 
                             <!-- Action Buttons -->
                             <div style="display: flex; gap: 10px; margin-top: 20px;">
-                                <a href="view_machines.php?zone=<?php echo $zone['zone_number']; ?>" 
+                                <a href="r-view_machines.php?zone=<?php echo $zone['zone_number']; ?>" 
                                    style="flex: 1; background: #3498db; color: white; text-align: center; padding: 10px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600;">
                                     View Machines
                                 </a>
-                                <a href="edit_zone.php?id=<?php echo $zone['id']; ?>" 
+                                <a href="r-edit_zone.php?id=<?php echo $zone['id']; ?>" 
                                    style="flex: 1; background: #f39c12; color: white; text-align: center; padding: 10px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600;">
                                     Edit Zone
                                 </a>
@@ -784,7 +784,7 @@ $map_data_json = json_encode($map_data);
                     <span style="font-size: 48px;">🗺️</span>
                     <h3 style="color: #2c3e50; margin-top: 20px; margin-bottom: 10px;">No Zones Found</h3>
                     <p style="color: #7f8c8d; margin-bottom: 20px;">Try adjusting your filters or search criteria.</p>
-                    <a href="view_zones.php" class="btn btn-primary">Clear Filters</a>
+                    <a href="r-view_zones.php" class="btn btn-primary">Clear Filters</a>
                 </div>
             <?php endif; ?>
         </div>
@@ -797,7 +797,7 @@ $map_data_json = json_encode($map_data);
             </div>
             <div class="legend-grid">
                 <?php 
-                $legend_zones = $conn->query("SELECT * FROM zoning_zone ORDER BY zone_number");
+                $legend_zones = $conn->query("SELECT * FROM rental_zoning_zone ORDER BY zone_number");
                 while($legend = $legend_zones->fetch_assoc()): 
                 ?>
                     <div class="legend-item">
@@ -934,7 +934,7 @@ $map_data_json = json_encode($map_data);
                                 ${zone.latitude}, ${zone.longitude}
                             </span>
                         </div>
-                        <a href="view_machines.php?zone=${zone.zone_number}" 
+                        <a href="r-view_machines.php?zone=${zone.zone_number}" 
                            style="display: block; text-align: center; margin-top: 15px; 
                                   padding: 12px; background: #3498db; color: white; 
                                   text-decoration: none; border-radius: 8px; 

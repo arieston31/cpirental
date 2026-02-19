@@ -11,8 +11,8 @@ if (!$contract_id) {
 // Get contract data
 $contract_query = $conn->query("
     SELECT c.*, cl.classification, cl.company_name 
-    FROM contracts c
-    JOIN clients cl ON c.client_id = cl.id
+    FROM rental_contracts c
+    JOIN rental_clients cl ON c.client_id = cl.id
     WHERE c.id = $contract_id
 ");
 $contract = $contract_query->fetch_assoc();
@@ -38,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $vatable = $_POST['vatable'];
     $status = $_POST['status'];
     
-    $update_sql = "UPDATE contracts SET 
+    $update_sql = "UPDATE rental_contracts SET 
                     contract_start = $contract_start,
                     contract_end = $contract_end,
                     mono_rate = '$mono_rate',
@@ -62,8 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         // Refresh contract data
         $contract_query = $conn->query("
             SELECT c.*, cl.classification, cl.company_name 
-            FROM contracts c
-            JOIN clients cl ON c.client_id = cl.id
+            FROM rental_contracts c
+            JOIN rental_clients cl ON c.client_id = cl.id
             WHERE c.id = $contract_id
         ");
         $contract = $contract_query->fetch_assoc();
@@ -145,8 +145,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <h1>Edit Contract</h1>
             <div>
-                <a href="view_contracts.php" class="btn btn-secondary" style="padding: 10px 20px; text-decoration: none;">Back to Contracts</a>
-                <a href="view_machines.php?contract_id=<?php echo $contract_id; ?>" class="btn" style="background: #27ae60; padding: 10px 20px; text-decoration: none;">View Machines</a>
+                <a href="r-view_contracts.php" class="btn btn-secondary" style="padding: 10px 20px; text-decoration: none;">Back to Contracts</a>
+                <a href="r-view_machines.php?contract_id=<?php echo $contract_id; ?>" class="btn" style="background: #27ae60; padding: 10px 20px; text-decoration: none;">View Machines</a>
             </div>
         </div>
         
@@ -281,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             
             <div style="margin-top: 30px; text-align: center;">
                 <button type="submit" class="btn">Update Contract</button>
-                <a href="view_contracts.php" class="btn btn-secondary">Cancel</a>
+                <a href="r-view_contracts.php" class="btn btn-secondary">Cancel</a>
             </div>
         </form>
     </div>

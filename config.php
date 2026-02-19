@@ -1,14 +1,3 @@
 <?php
-$host = 'localhost';
-$username = 'root';
-$password = '';
-$database = 'cpirental';
-
-$conn = new mysqli($host, $username, $password, $database);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
-
-
+include('/volume1/secure-config/cpirental.php');
 ?>

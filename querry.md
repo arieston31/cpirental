@@ -1,7 +1,7 @@
 now this what i want to create
 
 i want to have new php file and new data table
-name  add_contracts.php
+name  r-add_contracts.php
 
 i want to create contracts
 where 

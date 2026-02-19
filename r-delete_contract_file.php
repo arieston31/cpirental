@@ -10,7 +10,7 @@ if (!$contract_id || !$file_to_delete) {
 }
 
 // Get current contract files
-$query = $conn->query("SELECT contract_file FROM contracts WHERE id = $contract_id");
+$query = $conn->query("SELECT contract_file FROM rental_contracts WHERE id = $contract_id");
 $contract = $query->fetch_assoc();
 
 if ($contract) {
@@ -23,15 +23,14 @@ if ($contract) {
     }
     
     // Update database
-    $new_file_list = !empty($updated_files) ? implode(',', $updated_files) : NULL;
-    $update_sql = "UPDATE contracts SET contract_file = " . ($new_file_list ? "'$new_file_list'" : "NULL") . " WHERE id = $contract_id";
+    $update_sql = "UPDATE rental_contracts SET contract_file = " . ($new_file_list ? "'$new_file_list'" : "NULL") . " WHERE id = $contract_id";
     
     if ($conn->query($update_sql)) {
-        header("Location: upload_contract_file.php?contract_id=$contract_id&success=deleted");
+        header("Location: r-upload_contract_file.php?contract_id=$contract_id&success=deleted");
     } else {
-        header("Location: upload_contract_file.php?contract_id=$contract_id&error=delete_failed");
+        header("Location: r-upload_contract_file.php?contract_id=$contract_id&error=delete_failed");
     }
 } else {
-    header("Location: view_contracts.php");
+    header("Location: r-view_contracts.php");
 }
 exit();

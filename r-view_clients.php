@@ -37,7 +37,7 @@ if (!empty($where_clauses)) {
 }
 
 // Get total number of clients for pagination
-$count_sql = "SELECT COUNT(*) as total FROM clients $where_sql";
+$count_sql = "SELECT COUNT(*) as total FROM rental_clients $where_sql";
 $count_stmt = $conn->prepare($count_sql);
 
 if (!empty($params)) {
@@ -52,7 +52,7 @@ $total_pages = ceil($total_clients / $limit);
 // Get clients with pagination
 $sql = "SELECT id, classification, company_name, main_signatory, signatory_position, 
                main_number, main_address, tin_number, email, status, created_at 
-        FROM clients 
+        FROM rental_clients 
         $where_sql 
         ORDER BY created_at DESC 
         LIMIT ? OFFSET ?";
@@ -405,8 +405,8 @@ $clients = $result->fetch_all(MYSQLI_ASSOC);
         <div class="header">
             <h1>Client Management</h1>
             <div class="header-buttons">
-                <a href="dashboard.php" class="btn btn-dashboard">Dashboard</a>
-                <a href="add_client.php" class="btn btn-add">Add New Client</a>
+                <a href="r-dashboard.php" class="btn btn-dashboard">Dashboard</a>
+                <a href="r-add_client.php" class="btn btn-add">Add New Client</a>
             </div>
         </div>
         
@@ -443,7 +443,7 @@ $clients = $result->fetch_all(MYSQLI_ASSOC);
             </div>
             <button type="submit" class="search-btn">Search</button>
             <?php if (!empty($search) || !empty($classification_filter)): ?>
-                <a href="view_clients.php" class="btn" style="background-color: #6c757d;">Clear Filters</a>
+                <a href="r-view_clients.php" class="btn" style="background-color: #6c757d;">Clear Filters</a>
             <?php endif; ?>
         </form>
         
@@ -496,7 +496,7 @@ $clients = $result->fetch_all(MYSQLI_ASSOC);
                                 </td>
                                 <td><?php echo date('M d, Y', strtotime($client['created_at'])); ?></td>
                                 <td class="actions-cell">
-                                    <a href="edit_client.php?id=<?php echo $client['id']; ?>" class="btn btn-edit">Edit</a>
+                                    <a href="r-edit_client.php?id=<?php echo $client['id']; ?>" class="btn btn-edit">Edit</a>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -507,7 +507,7 @@ $clients = $result->fetch_all(MYSQLI_ASSOC);
                     <div class="empty-state-icon">📭</div>
                     <h3>No Clients Found</h3>
                     <p><?php echo !empty($search) ? 'Try a different search term or ' : ''; ?>
-                       <a href="add_client.php">add your first client</a> to get started.</p>
+                       <a href="r-add_client.php">add your first client</a> to get started.</p>
                 </div>
             <?php endif; ?>
         </div>

@@ -1,6 +1,6 @@
 <?php
 require_once 'config.php';
 
-    header('Location: dashboard.php');
+    header('Location: r-dashboard.php');
 
 ?>

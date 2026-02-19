@@ -2,7 +2,7 @@
 require_once 'config.php';
 
 // Get all zones for map and reference
-$zones_query = $conn->query("SELECT * FROM zoning_zone WHERE latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY zone_number");
+$zones_query = $conn->query("SELECT * FROM rental_zoning_zones WHERE latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY zone_number");
 $zones = [];
 while ($zone = $zones_query->fetch_assoc()) {
     $zones[] = $zone;
@@ -55,10 +55,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['check_zone'])) {
     // Find nearest zone using distance calculation
     $stmt = $conn->prepare("
         SELECT id, zone_number, area_center, reading_date, latitude, longitude,
-               (6371 * acos(cos(radians(?)) * cos(radians(latitude)) 
-               * cos(radians(longitude) - radians(?)) 
-               + sin(radians(?)) * sin(radians(latitude)))) AS distance
-        FROM zoning_zone 
+            (6371 * acos(cos(radians(?)) * cos(radians(latitude)) 
+            * cos(radians(longitude) - radians(?)) 
+            + sin(radians(?)) * sin(radians(latitude)))) AS distance
+        FROM rental_zoning_zones 
         WHERE latitude IS NOT NULL AND longitude IS NOT NULL
         ORDER BY distance ASC 
         LIMIT 1
@@ -76,10 +76,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['check_zone'])) {
             // Get all zones with distances for comparison
             $all_zones_query = $conn->prepare("
                 SELECT zone_number, area_center, latitude, longitude,
-                       (6371 * acos(cos(radians(?)) * cos(radians(latitude)) 
-                       * cos(radians(longitude) - radians(?)) 
-                       + sin(radians(?)) * sin(radians(latitude)))) AS distance
-                FROM zoning_zone 
+                    (6371 * acos(cos(radians(?)) * cos(radians(latitude)) 
+                    * cos(radians(longitude) - radians(?)) 
+                    + sin(radians(?)) * sin(radians(latitude)))) AS distance
+                FROM rental_zoning_zones 
                 WHERE latitude IS NOT NULL AND longitude IS NOT NULL
                 ORDER BY distance ASC
                 LIMIT 3
@@ -151,8 +151,8 @@ if (isset($_GET['get_zones'])) {
     $zones_data = [];
     $zones_query = $conn->query("
         SELECT z.*, COUNT(cm.id) as machine_count 
-        FROM zoning_zone z
-        LEFT JOIN contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
+        FROM rental_zoning_zones z
+        LEFT JOIN rental_contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
         GROUP BY z.id
         ORDER BY z.zone_number
     ");
@@ -502,8 +502,8 @@ if (isset($_GET['get_zones'])) {
                 </span>
             </h1>
             <div>
-                <a href="dashboard.php" class="btn btn-secondary">← Dashboard</a>
-                <a href="view_zones.php" class="btn btn-primary">View Zones</a>
+                <a href="r-dashboard.php" class="btn btn-secondary">← Dashboard</a>
+                <a href="r-view_zones.php" class="btn btn-primary">View Zones</a>
             </div>
         </div>
 
@@ -621,8 +621,8 @@ if (isset($_GET['get_zones'])) {
                         <?php 
                         $zone_stats = $conn->query("
                             SELECT z.*, COUNT(cm.id) as machine_count 
-                            FROM zoning_zone z
-                            LEFT JOIN contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
+                            FROM rental_zoning_zones z
+                            LEFT JOIN rental_contract_machines cm ON z.id = cm.zone_id AND cm.status = 'ACTIVE'
                             GROUP BY z.id
                             ORDER BY z.zone_number
                         ");

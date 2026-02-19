@@ -10,7 +10,7 @@ if (!$machine_id || !$file_to_delete) {
 }
 
 // Get current machine files
-$query = $conn->query("SELECT dr_pos_files FROM contract_machines WHERE id = $machine_id");
+$query = $conn->query("SELECT dr_pos_files FROM rental_contract_machines WHERE id = $machine_id");
 $machine = $query->fetch_assoc();
 
 if ($machine) {
@@ -26,17 +26,17 @@ if ($machine) {
     $new_file_list = !empty($updated_files) ? implode(',', $updated_files) : NULL;
     $file_count = count($updated_files);
     
-    $update_sql = "UPDATE contract_machines SET 
+    $update_sql = "UPDATE rental_contract_machines SET 
                    dr_pos_files = " . ($new_file_list ? "'$new_file_list'" : "NULL") . ",
                    dr_pos_file_count = $file_count 
                    WHERE id = $machine_id";
     
     if ($conn->query($update_sql)) {
-        header("Location: upload_drpos.php?machine_id=$machine_id&success=deleted");
+        header("Location: r-upload_drpos.php?machine_id=$machine_id&success=deleted");
     } else {
-        header("Location: upload_drpos.php?machine_id=$machine_id&error=delete_failed");
+        header("Location: r-upload_drpos.php?machine_id=$machine_id&error=delete_failed");
     }
 } else {
-    header("Location: view_machines.php");
+    header("Location: r-view_machines.php");
 }
 exit();

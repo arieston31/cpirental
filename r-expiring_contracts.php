@@ -11,8 +11,8 @@ $query = "SELECT
             cl.company_name, 
             cl.classification,
             DATEDIFF(c.contract_end, '$current_date') as days_left
-          FROM contracts c
-          JOIN clients cl ON c.client_id = cl.id
+          FROM rental_contracts c
+          JOIN rental_clients cl ON c.client_id = cl.id
           WHERE c.contract_end IS NOT NULL 
           AND c.contract_end BETWEEN '$current_date' AND DATE_ADD('$current_date', INTERVAL 60 DAY)
           AND c.status = 'ACTIVE'";
@@ -47,7 +47,7 @@ $contracts = $stmt->get_result();
 $total_expiring = $contracts->num_rows;
 $expiring_this_week = $conn->query("
     SELECT COUNT(*) as count 
-    FROM contracts 
+    FROM rental_contracts 
     WHERE contract_end IS NOT NULL 
     AND contract_end BETWEEN '$current_date' AND DATE_ADD('$current_date', INTERVAL 7 DAY)
     AND status = 'ACTIVE'
@@ -224,8 +224,8 @@ $expiring_this_week = $conn->query("
                 </span>
             </h1>
             <div>
-                <a href="dashboard.php" class="back-btn">← Back to Dashboard</a>
-                <a href="expired_contracts.php" class="btn btn-warning">View Expired</a>
+                <a href="r-dashboard.php" class="back-btn">← Back to Dashboard</a>
+                <a href="r-expired_contracts.php" class="btn btn-warning">View Expired</a>
             </div>
         </div>
 
@@ -242,7 +242,7 @@ $expiring_this_week = $conn->query("
                     <?php 
                     $expiring_30 = $conn->query("
                         SELECT COUNT(*) as count 
-                        FROM contracts 
+                        FROM rental_contracts 
                         WHERE contract_end IS NOT NULL 
                         AND contract_end BETWEEN '$current_date' AND DATE_ADD('$current_date', INTERVAL 30 DAY)
                         AND status = 'ACTIVE'
@@ -258,7 +258,7 @@ $expiring_this_week = $conn->query("
                     <?php 
                     $avg_days = $conn->query("
                         SELECT AVG(DATEDIFF(contract_end, '$current_date')) as avg_days
-                        FROM contracts
+                        FROM rental_contracts
                         WHERE contract_end IS NOT NULL
                         AND contract_end >= '$current_date'
                         AND status = 'ACTIVE'
@@ -287,7 +287,7 @@ $expiring_this_week = $conn->query("
                 </div>
                 <div class="filter-group" style="display: flex; gap: 10px;">
                     <button type="submit" class="btn btn-primary">Apply Filters</button>
-                    <a href="expiring_contracts.php" class="btn" style="background: #95a5a6; color: white;">Clear</a>
+                    <a href="r-expiring_contracts.php" class="btn" style="background: #95a5a6; color: white;">Clear</a>
                 </div>
             </form>
         </div>
@@ -324,7 +324,7 @@ $expiring_this_week = $conn->query("
                         ?>
                             <tr>
                                 <td>
-                                    <a href="edit_contract.php?id=<?php echo $contract['id']; ?>" class="contract-number">
+                                    <a href="r-edit_contract.php?id=<?php echo $contract['id']; ?>" class="contract-number">
                                         <?php echo htmlspecialchars($contract['contract_number']); ?>
                                     </a>
                                 </td>
@@ -347,7 +347,7 @@ $expiring_this_week = $conn->query("
                                     </span>
                                 </td>
                                 <td>
-                                    <a href="edit_contract.php?id=<?php echo $contract['id']; ?>" style="color: #3498db; text-decoration: none;">Renew</a>
+                                    <a href="r-edit_contract.php?id=<?php echo $contract['id']; ?>" style="color: #3498db; text-decoration: none;">Renew</a>
                                 </td>
                             </tr>
                         <?php endwhile; ?>
